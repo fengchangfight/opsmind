@@ -87,13 +87,11 @@ class BaseAgent(ABC):
          └──────┬──────┘
                 │
          ┌──────▼──────┐
-         │dense_search │  并行 ┐
-         ├─────────────┤       ├── 两路检索同时执行
-         │sparse_search│  并行 ┘
+         │embed_query  │  生成查询的稠密 + 稀疏向量（用于 Milvus Hybrid Search）
          └──────┬──────┘
                 │
          ┌──────▼──────┐
-         │  rrf_fusion │  倒数排名融合 (RRF)，合并两路结果
+         │hybrid_search│  Milvus Hybrid Search（dense+sparse）+ 内置 RRFRanker 融合
          └──────┬──────┘
                 │
          ┌──────▼──────┐
@@ -115,9 +113,9 @@ class RetrieveState(TypedDict):
     filters: dict                       # 元数据过滤条件
     top_k: int                          # 最终返回数量
     expanded_queries: list[str]         # 扩展查询变体
-    dense_results: list[ChunkResult]    # 稠密检索结果
-    sparse_results: list[ChunkResult]   # 稀疏检索结果
-    fused_results: list[ChunkResult]    # RRF 融合结果
+    dense_query_vector: list[float]     # 查询稠密向量
+    sparse_query_vector: dict           # 查询稀疏向量
+    fused_results: list[ChunkResult]    # Milvus Hybrid Search + RRF 融合结果
     reranked_results: list[ChunkResult] # 重排序后结果
     final_context: str                  # 最终拼接的上下文
     citations: list[Citation]           # 溯源引用列表
@@ -127,6 +125,8 @@ class ChunkResult:
     chunk_id: str
     content: str
     score: float                        # 检索得分
+    rerank_score: float                 # 重排序得分
+    doc_id: str
     doc_id: str
     doc_title: str
     section_path: list[str]
@@ -136,101 +136,100 @@ class ChunkResult:
 
 ### 3.3 核心节点实现
 
-#### 3.3.1 DenseSearch 节点
+#### 3.3.1 EmbedQuery 节点
 
 ```python
-async def dense_search_node(state: RetrieveState) -> dict:
-    """稠密向量检索"""
+async def embed_query_node(state: RetrieveState) -> dict:
+    """生成查询的稠密向量和稀疏向量，供后续 Hybrid Search 使用"""
     t0 = time.monotonic()
 
-    embeddings = await embedder.encode(state["query"])
-    # Milvus.search(
-    #     collection_name="chunks",
-    #     data=[embeddings],
-    #     anns_field="embedding_dense",
-    #     param={"metric_type": "IP", "params": {"ef": 128}},
-    #     limit=top_k * 2,  # 粗排多取一些，留给 RRF 融合
-    #     expr=build_filter_expr(state["filters"]),
-    # )
-    results = await milvus_store.dense_search(
-        vectors=embeddings,
-        top_k=state["top_k"] * 2,
-        filters=state["filters"],
-    )
+    dense_vector = await embedder.encode([state["query"]])
+    sparse_vector = await embedder.encode_sparse([state["query"]])
 
-    state["latency"]["dense"] = time.monotonic() - t0
-    return {"dense_results": results}
-```
-
-#### 3.3.2 SparseSearch 节点
-
-```python
-async def sparse_search_node(state: RetrieveState) -> dict:
-    """稀疏关键词检索（BM25 等效）"""
-    t0 = time.monotonic()
-
-    # 使用 BGE-M3 的稀疏编码能力
-    sparse_vector = await embedder.encode_sparse(state["query"])
-    results = await milvus_store.sparse_search(
-        vectors=sparse_vector,
-        top_k=state["top_k"] * 2,
-        filters=state["filters"],
-    )
-
-    state["latency"]["sparse"] = time.monotonic() - t0
-    return {"sparse_results": results}
-```
-
-#### 3.3.3 RRF Fusion 节点（核心算法）
-
-```python
-def rrf_fusion_node(state: RetrieveState) -> dict:
-    """
-    Reciprocal Rank Fusion (RRF) 融合算法。
-    不依赖 Milvus 内置融合，自己实现以加深理解。
-
-    公式: score(doc) = Σ (1 / (k + rank_i(doc)))
-    其中 k = 60（经验值），rank_i 是 doc 在第 i 路检索中的排名。
-    """
-    t0 = time.monotonic()
-    k = 60
-    dense_results = state["dense_results"]
-    sparse_results = state["sparse_results"]
-
-    # chunk_id → RRF score
-    scores: dict[str, float] = {}
-    doc_meta: dict[str, ChunkResult] = {}
-
-    # 稠密排名贡献
-    for rank, result in enumerate(dense_results, start=1):
-        scores[result.chunk_id] = 1.0 / (k + rank)
-        doc_meta[result.chunk_id] = result
-
-    # 稀疏排名贡献（累加）
-    for rank, result in enumerate(sparse_results, start=1):
-        if result.chunk_id in scores:
-            scores[result.chunk_id] += 1.0 / (k + rank)
-        else:
-            scores[result.chunk_id] = 1.0 / (k + rank)
-            doc_meta[result.chunk_id] = result
-
-    # 按 RRF 分数排序
-    sorted_ids = sorted(scores.keys(), key=lambda cid: scores[cid], reverse=True)
-
-    fused_results = []
-    for chunk_id in sorted_ids:
-        r = doc_meta[chunk_id]
-        r.score = scores[chunk_id]
-        fused_results.append(r)
-
-    state["latency"]["fusion"] = time.monotonic() - t0
+    state["latency"]["embed_query"] = time.monotonic() - t0
     return {
-        "fused_results": fused_results[:state["top_k"]],
+        "dense_query_vector": dense_vector[0],
+        "sparse_query_vector": sparse_vector[0],
         "latency": state["latency"],
     }
 ```
 
-#### 3.3.4 Rerank 节点
+#### 3.3.2 HybridSearch 节点
+
+```python
+async def hybrid_search_node(state: RetrieveState) -> dict:
+    """
+    Milvus Hybrid Search：稠密 + 稀疏向量混合检索，服务端 RRFRanker 融合。
+    一次网络往返完成，性能最优。
+    """
+    t0 = time.monotonic()
+
+    results = await milvus_store.hybrid_search(
+        dense_vector=state["dense_query_vector"],
+        sparse_vector=state["sparse_query_vector"],
+        top_k=min(state["top_k"] * 3, 50),  # 粗排多取，留给 reranker
+        filters=state["filters"],
+        rerank_strategy="rrf",  # Milvus 内置 RRFRanker(k=60)
+    )
+
+    state["latency"]["hybrid_search"] = time.monotonic() - t0
+    return {
+        "fused_results": results,
+        "latency": state["latency"],
+    }
+```
+
+#### 3.3.3 RRF Fusion 节点
+
+```python
+async def rrf_fusion_node(state: RetrieveState) -> dict:
+    """
+    Reciprocal Rank Fusion (RRF) 融合。
+    直接使用 Milvus 内置 hybrid_search() + RRFRanker，
+    一次网络往返完成稠密+稀疏检索+融合，性能最优。
+    """
+    t0 = time.monotonic()
+
+    dense_vector = state.get("dense_query_vector")
+    sparse_vector = state.get("sparse_query_vector")
+
+    # 使用 Milvus 内置融合（RRFRanker, k=60）
+    results = await milvus_store.hybrid_search(
+        dense_vector=dense_vector,
+        sparse_vector=sparse_vector,
+        top_k=state["top_k"],
+        filters=state["filters"],
+        rerank_strategy="rrf",  # Milvus 内置 RRFRanker(k=60)
+    )
+
+    state["latency"]["fusion"] = time.monotonic() - t0
+    return {
+        "fused_results": results,
+        "latency": state["latency"],
+    }
+```
+
+> **附录：RRF 算法原理**
+>
+> RRF 公式极简：`score(d) = Σ (1 / (k + rank_i(d)))`，其中 k=60。算法本身没有复杂逻辑，不"黑盒"。
+> 使用 Milvus 内置 RRFRanker 的理由：
+> 1. 服务端融合，一次网络往返，延迟更低
+> 2. 无需自行维护两组搜索结果的排序映射
+> 3. 与大厂实践一致（Anthropic, Cohere 均用服务端融合）
+>
+> 如需自建（教学用途），可参考以下代码：
+> ```python
+> # 仅供学习参考，生产不用
+> def rrf_manual(dense: list, sparse: list, k=60) -> list:
+>     scores = {}
+>     for rank, r in enumerate(dense, 1):
+>         scores[r.chunk_id] = 1.0 / (k + rank)
+>     for rank, r in enumerate(sparse, 1):
+>         scores[r.chunk_id] = scores.get(r.chunk_id, 0) + 1.0 / (k + rank)
+>     return sorted(scores, key=scores.get, reverse=True)
+> ```
+
+#### 3.3.3 Rerank 节点
 
 ```python
 async def rerank_node(state: RetrieveState) -> dict:
@@ -267,7 +266,7 @@ async def rerank_node(state: RetrieveState) -> dict:
     }
 ```
 
-#### 3.3.5 BuildContext 节点
+#### 3.3.4 BuildContext 节点
 
 ```python
 async def build_context_node(state: RetrieveState) -> dict:
@@ -335,20 +334,16 @@ Return JSON: {{"variants": ["variant1", "variant2", ...]}}"""
 def _build_graph(self):
     self.state_graph.add_node("parse_query", parse_query_node)
     self.state_graph.add_node("expand_query", expand_query_node)
-    self.state_graph.add_node("dense_search", dense_search_node)
-    self.state_graph.add_node("sparse_search", sparse_search_node)
-    self.state_graph.add_node("rrf_fusion", rrf_fusion_node)
+    self.state_graph.add_node("embed_query", embed_query_node)
+    self.state_graph.add_node("hybrid_search", hybrid_search_node)
     self.state_graph.add_node("rerank", rerank_node)
     self.state_graph.add_node("build_context", build_context_node)
 
     self.state_graph.set_entry_point("parse_query")
     self.state_graph.add_edge("parse_query", "expand_query")
-    self.state_graph.add_edge("expand_query", "dense_search")
-    self.state_graph.add_edge("expand_query", "sparse_search")
-    # 注意：LangGraph 中，dense/search 并行执行后汇聚到 rrf_fusion
-    self.state_graph.add_edge("dense_search", "rrf_fusion")
-    self.state_graph.add_edge("sparse_search", "rrf_fusion")
-    self.state_graph.add_edge("rrf_fusion", "rerank")
+    self.state_graph.add_edge("expand_query", "embed_query")
+    self.state_graph.add_edge("embed_query", "hybrid_search")
+    self.state_graph.add_edge("hybrid_search", "rerank")
     self.state_graph.add_edge("rerank", "build_context")
     self.state_graph.set_finish_point("build_context")
 ```

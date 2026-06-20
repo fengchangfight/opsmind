@@ -661,7 +661,12 @@ class ContextualEmbeddingEnhancer:
     """
     为每个 Chunk 生成上下文前缀，解决孤立 chunk 语义丢失问题。
     参考：Anthropic 的 Contextual Retrieval 方法。
+
+    策略：仅对高价值文档类型启用（P0: runbook, incident_report），
+    其他类型文档跳过增强以节省 LLM 调用成本。
     """
+
+    P0_DOC_TYPES = {"runbook", "incident_report"}
 
     def __init__(self, llm_client: LLMClient):
         self.llm = llm_client
@@ -670,7 +675,14 @@ class ContextualEmbeddingEnhancer:
         """
         为每个 chunk 生成上下文前缀。
         前缀描述该 chunk 在整个文档中的位置和作用。
+
+        仅对 P0 文档类型启用：runbook, incident_report。
+        其他类型跳过，context_prefix 保持为空。
         """
+        doc_type = document.metadata.get("doc_type", "")
+        if doc_type not in self.P0_DOC_TYPES:
+            return chunks  # 跳过增强，直接返回
+
         prompt = CONTEXT_PREFIX_PROMPT.format(
             document_title=document.title,
             whole_document=document.content[:3000],  # 截断

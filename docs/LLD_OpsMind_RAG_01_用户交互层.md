@@ -419,7 +419,458 @@ frontend/
 
 ---
 
-## 11. 接口依赖（对 API 网关层）
+## 11. 构建与工程化 (Vite + TypeScript)
+
+### 11.1 Vite 配置
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+    },
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          ui: ['@shadcn/ui'],
+        },
+      },
+    },
+  },
+});
+```
+
+### 11.2 tsconfig.json 关键配置
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] }
+  },
+  "include": ["src"]
+}
+```
+
+### 11.3 Docker 多阶段构建
+
+```dockerfile
+# Stage 1: build
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm build
+
+# Stage 2: serve
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+```
+
+---
+
+## 12. CSS 方案 (Tailwind CSS + shadcn/ui)
+
+### 12.1 基础配置
+
+```js
+// tailwind.config.js
+export default {
+  content: ['./src/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        // 映射到 §7.2 色彩语义
+        'user-bubble':   { DEFAULT: '#3B82F6', light: '#DBEAFE' },
+        'ai-bubble':     { DEFAULT: '#F3F4F6', dark: '#D1D5DB' },
+        'citation':      { DEFAULT: '#10B981' },
+        'trace-success': { DEFAULT: '#10B981' },
+        'trace-active':  { DEFAULT: '#3B82F6' },
+        'trace-error':   { DEFAULT: '#EF4444' },
+        'interrupt':     { DEFAULT: '#F59E0B' },
+        'tool-call':     { DEFAULT: '#8B5CF6' },
+        'confidence-low':    '#EF4444',
+        'confidence-medium': '#F59E0B',
+        'confidence-high':   '#10B981',
+      },
+    },
+  },
+  plugins: [],
+};
+```
+
+### 12.2 shadcn/ui 组件选用
+
+| shadcn 组件 | 对应 UI 元素 |
+|-------------|------------|
+| `Card` | AIBubble 容器、CitationCard |
+| `Dialog` | InterruptDialog 弹窗 |
+| `Select` | SessionSelector 下拉 |
+| `Button` | SendButton、ActionButtons |
+| `Textarea` | InputBox、InterruptDialog 输入 |
+| `ScrollArea` | MessageList 滚动容器 |
+| `Tooltip` | CitationMarker hover 提示 |
+| `Badge` | ToolCallBadge、TraceNode 状态 |
+| `Toast` | 全局通知 |
+
+### 12.3 全局样式变量映射
+
+```css
+/* src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-user: theme('colors.user-bubble.DEFAULT');
+  --color-ai: theme('colors.ai-bubble.DEFAULT');
+  --color-citation: theme('colors.citation.DEFAULT');
+}
+```
+
+---
+
+## 13. 路由设计 (React Router v6)
+
+### 13.1 路由表
+
+| 路径 | 组件 | 认证要求 | 说明 |
+|------|------|---------|------|
+| `/chat` | `ChatPage` | 需要 | 主对话界面（默认入口） |
+| `/chat/:sessionId` | `ChatPage` | 需要 | 恢复指定 session |
+| `/admin` | `AdminPage` | 需要 + admin | 调试面板（session 查看、指标） |
+| `/login` | `LoginPage` | 不需要 | 认证页面 |
+
+### 13.2 路由配置
+
+```tsx
+// src/router.tsx
+import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { AuthGuard } from '@/components/common/AuthGuard';
+import { AdminGuard } from '@/components/common/AdminGuard';
+import App from '@/components/App';
+import ChatPage from '@/pages/ChatPage';
+import AdminPage from '@/pages/AdminPage';
+import LoginPage from '@/pages/LoginPage';
+
+export const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <App />,
+    children: [
+      { index: true, element: <Navigate to="/chat" replace /> },
+      {
+        path: 'chat',
+        element: <AuthGuard><ChatPage /></AuthGuard>,
+      },
+      {
+        path: 'chat/:sessionId',
+        element: <AuthGuard><ChatPage /></AuthGuard>,
+      },
+      {
+        path: 'admin',
+        element: <AdminGuard><AdminPage /></AdminGuard>,
+      },
+      { path: 'login', element: <LoginPage /> },
+    ],
+  },
+]);
+```
+
+### 13.3 路由守卫
+
+```tsx
+// AuthGuard.tsx
+function AuthGuard({ children }: { children: React.ReactNode }) {
+  const token = useAuthStore((s) => s.token);
+  if (!token) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+// AdminGuard.tsx
+function AdminGuard({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((s) => s.role);
+  if (role !== 'admin') return <Navigate to="/chat" replace />;
+  return <>{children}</>;
+}
+```
+
+---
+
+## 14. API 层封装
+
+### 14.1 fetch 客户端 (client.ts)
+
+```typescript
+// src/api/client.ts
+const BASE_URL = '/api';
+
+class ApiClient {
+  private getHeaders(): HeadersInit {
+    const token = useAuthStore.getState().token;
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }
+
+  async post<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, err.message || 'Request failed');
+    }
+    return res.json();
+  }
+
+  async get<T>(path: string): Promise<T> {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new ApiError(res.status, 'Request failed');
+    return res.json();
+  }
+}
+
+export const api = new ApiClient();
+```
+
+### 14.2 SSE 客户端 (sse.ts)
+
+```typescript
+// src/api/sse.ts
+type SSEEventHandler = (event: string, data: unknown) => void;
+
+class SSEClient {
+  private es: EventSource | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+
+  connect(url: string, handler: SSEEventHandler): void {
+    this.es = new EventSource(url);
+
+    this.es.onmessage = (event) => {
+      try {
+        const { event: type, data } = JSON.parse(event.data);
+        handler(type, data);
+        if (type === 'final_answer' || type === 'error') this.close();
+      } catch {
+        // 心跳忽略
+      }
+    };
+
+    this.es.onerror = () => {
+      this.reconnectAttempts++;
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        this.close();
+        handler('error', { code: 'SSE_FAILED', message: 'Connection lost, please retry' });
+      }
+      // 否则依赖 SSE 原生的自动重连
+    };
+  }
+
+  close(): void {
+    this.es?.close();
+    this.es = null;
+    this.reconnectAttempts = 0;
+  }
+}
+
+export const sse = new SSEClient();
+```
+
+---
+
+## 15. 开发工作流 (MSW + Vitest)
+
+### 15.1 MSW 模拟后端
+
+```typescript
+// src/mocks/handlers.ts
+import { http, HttpResponse } from 'msw';
+
+export const handlers = [
+  // 模拟 SSE 查询接口
+  http.get('/api/query', ({ request }) => {
+    const url = new URL(request.url);
+    const query = url.searchParams.get('query') || '';
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        const events = [
+          { event: 'agent_start', data: { agent_id: 'retrieve' } },
+          { event: 'retrieval_result', data: { chunks: [], citations: [] } },
+          { event: 'agent_start', data: { agent_id: 'reason' } },
+          { event: 'final_answer', data: { answer: `Mock answer for: ${query}` } },
+        ];
+        for (const e of events) {
+          controller.enqueue(encoder.encode(`event: ${e.event}\ndata: ${JSON.stringify(e.data)}\n\n`));
+        }
+        controller.close();
+      },
+    });
+
+    return new HttpResponse(stream, {
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  }),
+
+  // 模拟 retrieve 接口
+  http.post('/api/retrieve', async ({ request }) => {
+    const body = await request.json() as any;
+    return HttpResponse.json({
+      query: body.query,
+      results: [{ chunk_id: 'mock-1', content: 'Mock chunk', score: 0.95 }],
+      latency_ms: 120,
+    });
+  }),
+];
+```
+
+```typescript
+// src/mocks/browser.ts
+import { setupWorker } from 'msw/browser';
+import { handlers } from './handlers';
+export const worker = setupWorker(...handlers);
+```
+
+```typescript
+// src/main.tsx (开发时启用)
+async function main() {
+  if (import.meta.env.DEV) {
+    const { worker } = await import('./mocks/browser');
+    await worker.start({ onUnhandledRequest: 'bypass' });
+  }
+  // ... render
+}
+```
+
+### 15.2 Vitest 测试
+
+```typescript
+// src/components/Chat/__tests__/InputBox.test.tsx
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { InputBox } from '../InputBox';
+
+describe('InputBox', () => {
+  it('calls onSubmit with trimmed value', () => {
+    const onSubmit = vi.fn();
+    render(<InputBox onSubmit={onSubmit} disabled={false} />);
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: '  hello  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith('hello');
+  });
+
+  it('disables submit when empty', () => {
+    render(<InputBox onSubmit={vi.fn()} disabled={false} />);
+    const btn = screen.getByRole('button', { name: /send/i });
+    expect(btn).toBeDisabled();
+  });
+
+  it('disables submit when streaming', () => {
+    render(<InputBox onSubmit={vi.fn()} disabled={true} />);
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'test' } });
+    const btn = screen.getByRole('button', { name: /send/i });
+    expect(btn).toBeDisabled();
+  });
+});
+```
+
+```yaml
+# vitest.config.ts
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+    globals: true,
+  },
+});
+```
+
+---
+
+## 16. 依赖清单 (package.json)
+
+```json
+{
+  "name": "opsmind-rag-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "lint": "eslint src --ext .ts,.tsx --fix"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.1",
+    "zustand": "^4.5.2",
+    "react-virtuoso": "^4.7.10",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "vite": "^5.2.11",
+    "@vitejs/plugin-react": "^4.3.0",
+    "tailwindcss": "^3.4.3",
+    "postcss": "^8.4.38",
+    "autoprefixer": "^10.4.19",
+    "@shadcn/ui": "^0.8.0",
+    "msw": "^2.3.0",
+    "vitest": "^1.6.0",
+    "@testing-library/react": "^15.0.7",
+    "@testing-library/jest-dom": "^6.4.5",
+    "jsdom": "^24.1.0",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^7.8.0",
+    "@typescript-eslint/parser": "^7.8.0"
+  }
+}
+```
+
+---
+
+## 17. 接口依赖（对 API 网关层）
 
 | 接口 | 方法 | 用途 |
 |------|------|------|
@@ -431,8 +882,9 @@ frontend/
 
 ---
 
-## 12. 变更日志
+## 18. 变更日志
 
 | 版本 | 日期 | 变更 | 作者 |
 |------|------|------|------|
 | v1.0 | 2026-06-20 | 初始版本 | AI-assisted Design |
+| v1.1 | 2026-06-20 | 补充构建工程化、CSS方案、路由设计、API封装、MSW开发工作流、依赖清单 | AI-assisted Design |
