@@ -53,12 +53,13 @@ class RetrieveAgent:
             except Exception:
                 pass  # Query expansion is best-effort
 
-        # Embed + search each variant, collect unique results
+        # Embed + hybrid search each variant
         all_results: list[SearchResult] = []
         seen = set()
         for q in expanded_queries:
-            query_embedding = await self.embedder.embed_single(q)
-            results = self.vector_store.search(query_embedding, top_k=top_k * 2, filters=filters)
+            dense = await self.embedder.embed_single(q)
+            sparse = await self.embedder.embed_sparse_single(q)
+            results = self.vector_store.hybrid_search(dense, sparse, top_k=top_k * 3, filters=filters)
             for r in results:
                 if r.chunk_id not in seen:
                     seen.add(r.chunk_id)

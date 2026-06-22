@@ -1,29 +1,54 @@
-﻿from typing import Optional
-from fastembed import TextEmbedding
-from app.config import settings
-
-# Global lazy-loaded embedder
-_embedder: Optional[TextEmbedding] = None
+﻿"""FastEmbed wrapper — dense + sparse embeddings."""
+from typing import Optional
+from fastembed import TextEmbedding, SparseTextEmbedding
 
 
-def _get_embedder() -> TextEmbedding:
-    global _embedder
-    if _embedder is None:
-        _embedder = TextEmbedding(model_name=settings.embedding_model)
-    return _embedder
+# Lazy-loaded singletons
+_dense: Optional[TextEmbedding] = None
+_sparse: Optional[SparseTextEmbedding] = None
+
+
+def _get_dense() -> TextEmbedding:
+    global _dense
+    if _dense is None:
+        from app.config import settings
+        _dense = TextEmbedding(model_name=settings.embedding_dense_model)
+    return _dense
+
+
+def _get_sparse() -> SparseTextEmbedding:
+    global _sparse
+    if _sparse is None:
+        from app.config import settings
+        _sparse = SparseTextEmbedding(model_name=settings.embedding_sparse_model)
+    return _sparse
 
 
 class Embedder:
-    def __init__(self):
-        pass
+    """Dense + sparse embedding generator."""
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        model = _get_embedder()
-        embeddings = list(model.embed(texts))
-        return [emb.tolist() for emb in embeddings]
+        model = _get_dense()
+        return [emb.tolist() for emb in model.embed(texts)]
 
     async def embed_single(self, text: str) -> list[float]:
         results = await self.embed([text])
         return results[0]
+
+    async def embed_sparse(self, texts: list[str]) -> list[dict[int, float]]:
+        """Generate BM25-style sparse vectors: {token_id: weight}."""
+        if not texts:
+            return []
+        model = _get_sparse()
+        results = []
+        for emb in model.embed(texts):
+            indices = emb.indices.tolist() if hasattr(emb, 'indices') else list(emb.keys())
+            values = emb.values.tolist() if hasattr(emb, 'values') else list(emb.values())
+            results.append(dict(zip(indices, values)))
+        return results
+
+    async def embed_sparse_single(self, text: str) -> dict[int, float]:
+        results = await self.embed_sparse([text])
+        return results[0] if results else {}

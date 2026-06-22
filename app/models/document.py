@@ -22,6 +22,7 @@ class Chunk(BaseModel):
     content: str
     context_prefix: Optional[str] = None
     embedding: Optional[list[float]] = None
+    sparse_embedding: Optional[dict] = None
     start_line: int = 0
     end_line: int = 0
     section_path: list[str] = Field(default_factory=list)

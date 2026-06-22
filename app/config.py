@@ -11,7 +11,8 @@ class Settings(BaseSettings):
     llm_model: str = "deepseek-v4-pro"
 
     # Embedding (local via FastEmbed)
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_dense_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_sparse_model: str = "Qdrant/bm25"
 
     # Milvus
     milvus_host: str = "localhost"

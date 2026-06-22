@@ -18,7 +18,7 @@ async def main():
     print("=" * 50)
 
     # 1. Config
-    print(f"\n1. Config: model={settings.llm_model}, embed={settings.embedding_model}")
+    print(f"\n1. Config: model={settings.llm_model}, dense={settings.embedding_dense_model}, sparse={settings.embedding_sparse_model}")
     print(f"   Milvus: {settings.milvus_host}:{settings.milvus_port}")
 
     # 2. Vector Store
