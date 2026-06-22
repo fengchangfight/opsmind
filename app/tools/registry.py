@@ -31,12 +31,18 @@ class ToolRegistry:
         return [t.to_openai_function() for t in self._tools.values()]
 
     async def execute(self, name: str, arguments: dict) -> str:
-        """Execute a native tool by name."""
+        """Execute a native tool by name, with timeout protection."""
+        import asyncio
         tool = self._tools.get(name)
         if not tool:
             return f"Error: Tool '{name}' not found"
         try:
-            return await tool.execute(arguments)
+            return await asyncio.wait_for(
+                tool.execute(arguments),
+                timeout=tool.timeout,
+            )
+        except asyncio.TimeoutError:
+            return f"Error: Tool '{name}' timed out after {tool.timeout}s"
         except Exception as e:
             return f"Error executing '{name}': {e}"
 

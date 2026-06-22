@@ -14,6 +14,8 @@ class BaseTool(ABC):
     name: str = ""
     description: str = ""
     parameters: dict = {"type": "object", "properties": {}, "required": []}
+    timeout: int = 30          # Per-tool execution timeout (seconds)
+    parallel_safe: bool = True  # Can be executed in parallel with other tools
 
     @abstractmethod
     async def execute(self, arguments: dict[str, Any]) -> str:
