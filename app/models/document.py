@@ -46,6 +46,7 @@ class SearchResult(BaseModel):
     content: str
     doc_title: str
     score: float
+    rerank_score: float = 0.0
     start_line: int = 0
     end_line: int = 0
     metadata: dict = Field(default_factory=dict)
