@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     chunk_size: int = 512
     chunk_overlap: int = 64
 
+    # Database
+    db_backend: str = "sqlite"       # "sqlite" or "postgres"
+    sqlite_path: str = "./data/opsmind.db"
+    postgres_dsn: str = "postgresql://localhost:5432/opsmind"
+
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8000

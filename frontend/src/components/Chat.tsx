@@ -2,12 +2,28 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Message, Citation } from '../types';
-import type { SSEMessage } from '../types';
-import { connectSSE, disconnectSSE } from '../api/client';
+import { connectSSE, disconnectSSE, fetchSessions, fetchSession } from '../api/client';
 
 let msgIdCounter = 0;
 function nextId(): string {
   return `msg-${++msgIdCounter}`;
+}
+
+interface SessionMeta {
+  session_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const SESSION_KEY = 'opsmind_session_id';
+
+function loadStoredSid(): string | null {
+  try { return localStorage.getItem(SESSION_KEY); } catch { return null; }
+}
+
+function storeSid(sid: string) {
+  try { localStorage.setItem(SESSION_KEY, sid); } catch {}
 }
 
 export default function Chat() {
@@ -16,15 +32,52 @@ export default function Chat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [citations, setCitations] = useState<Citation[]>([]);
   const [activeAgents, setActiveAgents] = useState<Set<string>>(new Set());
+  const [sessionId, setSessionId] = useState<string>(loadStoredSid() || '');
+  const [sessions, setSessions] = useState<SessionMeta[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
+  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
+
+  // Load session list + current session on mount
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+    fetchSessions().then((list) => {
+      setSessions(list);
+      const cur = list.find((s: SessionMeta) => s.session_id === sessionId);
+      if (cur) {
+        loadSession(cur.session_id);
+      } else {
+        setLoaded(true);
+      }
+    });
+  }, []);
+
+  async function loadSession(sid: string) {
+    const data = await fetchSession(sid);
+    if (data.messages) {
+      setMessages(data.messages.map((m: any) => ({
+        id: `db-${m.id}`,
+        role: m.role,
+        content: m.content,
+        citations: m.citations || [],
+      })));
+    }
+    setSessionId(sid);
+    storeSid(sid);
+    setLoaded(true);
+  }
+
+  async function newSession() {
+    setMessages([]);
+    setCitations([]);
+    setSessionId('');
+    localStorage.removeItem(SESSION_KEY);
+    setLoaded(true);
+  }
 
   const handleSend = useCallback(() => {
     const query = input.trim();
@@ -41,10 +94,19 @@ export default function Chat() {
 
     let streamContent = '';
 
+    const params = new URLSearchParams();
+    params.set('query', query);
+    params.set('top_k', '5');
+    if (sessionId) params.set('session_id', sessionId);
+
     const handler = (event: string, data: any) => {
       switch (event) {
         case 'agent_start':
           setActiveAgents((prev) => new Set(prev).add(data.agent_id || 'agent'));
+          if (data.session_id && !sessionId) {
+            setSessionId(data.session_id);
+            storeSid(data.session_id);
+          }
           break;
 
         case 'retrieval_result':
@@ -70,6 +132,8 @@ export default function Chat() {
           );
           setIsStreaming(false);
           disconnectSSE();
+          // Refresh session list
+          fetchSessions().then(setSessions);
           break;
 
         case 'error':
@@ -86,8 +150,8 @@ export default function Chat() {
       }
     };
 
-    connectSSE(`/api/query?query=${encodeURIComponent(query)}&top_k=5`, handler);
-  }, [input, isStreaming]);
+    connectSSE(`/api/query?${params.toString()}`, handler);
+  }, [input, isStreaming, sessionId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -127,7 +191,7 @@ export default function Chat() {
               <p className="text-2xl font-bold mb-2">OpsMind RAG</p>
               <p className="text-sm">输入运维问题，AI 将从知识库中检索并回答</p>
               <div className="mt-4 text-xs text-gray-300">
-                示例: "如何排查 MySQL 主从延迟?" · "SRE oncall 流程是什么?" · "如何配置告警规则?"
+                示例: "How to ensure deterministic evaluation results in CI?" · "What is the retention policy?" · "How does evaluator backpressure work?"
               </div>
             </div>
           )}
@@ -188,6 +252,33 @@ export default function Chat() {
       {/* Citation Panel */}
       <aside className="w-80 bg-white border-l overflow-y-auto shrink-0">
         <div className="px-4 py-3 border-b">
+          <h2 className="text-sm font-semibold text-gray-700">会话</h2>
+        </div>
+        <div className="px-3 py-2">
+          <button
+            onClick={newSession}
+            className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-blue-50 text-blue-600 font-medium"
+          >
+            + 新建会话
+          </button>
+        </div>
+        <div className="divide-y border-t">
+          {sessions.map((s) => (
+            <button
+              key={s.session_id}
+              onClick={() => loadSession(s.session_id)}
+              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 ${
+                s.session_id === sessionId ? 'bg-blue-50' : ''
+              }`}
+            >
+              <div className="truncate text-gray-700">{s.title || '(新会话)'}</div>
+              <div className="text-gray-400 mt-0.5">{s.updated_at?.slice(0, 16) || ''}</div>
+            </button>
+          ))}
+        </div>
+
+        {/* Citations */}
+        <div className="px-4 py-3 border-t">
           <h2 className="text-sm font-semibold text-gray-700">引用来源</h2>
         </div>
         {citations.length === 0 ? (

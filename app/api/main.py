@@ -3,15 +3,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.persistence import get_repo
 from app.retrieval import Embedder, VectorStore
 from app.agents import RetrieveAgent, ReasonAgent
-from app.api.routes import query, retrieve, resume
+from app.api.routes import query, retrieve, resume, sessions
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"[OpsMind] Starting up...")
     print(f"[OpsMind] Vector store: Milvus {settings.milvus_host}:{settings.milvus_port}")
+
+    repo = get_repo()
+    repo.init()
+    print(f"[OpsMind] DB backend: {settings.db_backend}")
 
     embedder = Embedder()
     vector_store = VectorStore()
@@ -52,6 +57,7 @@ app.add_middleware(
 app.include_router(query.router, prefix="/api")
 app.include_router(retrieve.router, prefix="/api")
 app.include_router(resume.router, prefix="/api")
+app.include_router(sessions.router, prefix="/api")
 
 
 @app.get("/health")

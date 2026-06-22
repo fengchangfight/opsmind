@@ -61,16 +61,19 @@ class ReasonAgent:
         query: str,
         results: list[SearchResult],
         citations: list[Citation],
+        history: list[dict] | None = None,
     ):
         context = self._build_context(results, citations)
         user_message = self._build_user_message(query, context)
 
+        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if history:
+            messages.extend(history[-10:])  # 最近 10 轮
+        messages.append({"role": "user", "content": user_message})
+
         stream = await self.client.chat.completions.create(
             model=self.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
+            messages=messages,
             temperature=0.3,
             max_tokens=2048,
             stream=True,

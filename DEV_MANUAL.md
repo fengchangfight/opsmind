@@ -137,13 +137,14 @@ opsmind-rag/
 
 流式问答接口，返回 Server-Sent Events。
 
-**请求**: `GET /api/query?query=<str>&top_k=<int>&category=<str>`
+**请求**: `GET /api/query?query=<str>&top_k=<int>&category=<str>&history=<base64>`
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | query | string | 必填 | 用户查询 |
 | top_k | int | 5 | 返回文档数 |
 | category | string | 可选 | 过滤文档类别 (confluence, github) |
+| history | string | 可选 | Base64 编码的历史消息 JSON (`[{"role":"user","content":"..."},...]`)，用于多轮对话上下文 |
 
 **SSE 事件流**:
 

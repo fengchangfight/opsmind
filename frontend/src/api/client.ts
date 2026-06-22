@@ -30,27 +30,17 @@ export function disconnectSSE(): void {
   eventSource = null;
 }
 
-export async function postQuery(query: string, topK: number = 5): Promise<Response> {
-  return fetch('/api/query', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, top_k: topK }),
-  });
+export async function fetchSessions(): Promise<any[]> {
+  const res = await fetch('/api/sessions');
+  const data = await res.json();
+  return data.sessions || [];
 }
 
-export async function postRetrieve(query: string, topK: number = 10) {
-  const res = await fetch('/api/retrieve', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, top_k: topK }),
-  });
+export async function fetchSession(sessionId: string): Promise<any> {
+  const res = await fetch(`/api/sessions/${sessionId}`);
   return res.json();
 }
 
-export async function postResume(sessionId: string, humanInput: string, option: string = 'continue') {
-  return fetch('/api/resume', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, human_input: humanInput, option }),
-  });
+export async function deleteSession(sessionId: string): Promise<void> {
+  await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
 }

@@ -30,6 +30,7 @@
 ### 核心能力
 
 - **混合检索** — Milvus `hybrid_search()` 稠密向量检索 + 内置 RRFRanker 融合
+- **多轮对话** — 自动携带最近 10 轮历史消息，LLM 感知会话上下文
 - **流式推理** — SSE (Server-Sent Events) 逐 token 推送，实时显示生成过程
 - **溯源引用** — 每个回答附带精确来源标记 `[1] [2]`，可追溯到文档名和片段
 - **可扩展** — Connector/Tool 接口抽象，新增数据源和工具零代码侵入
@@ -126,7 +127,7 @@ event: final_answer      → {"answer": "...", "citations": [...]}
 
 ```bash
 # CLI 快速测试
-python scripts/explore_milvus.py search "deterministic evaluation CI flake"
+curl "http://localhost:8000/api/retrieve" -H "Content-Type: application/json" -d '{"query":"deterministic evaluation CI flake","top_k":3}'
 ```
 
 ---
