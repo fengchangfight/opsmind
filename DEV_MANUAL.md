@@ -1,4 +1,4 @@
-# OpsMind RAG — 开发手册 (DEV MANUAL)
+﻿# app RAG — 开发手册 (DEV MANUAL)
 
 **版本**: v0.1  
 **日期**: 2026-06-20
@@ -70,7 +70,7 @@ python scripts/ingest.py
 
 ```bash
 # 后端
-uvicorn opmind.api.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
 
 # 前端 (另开终端)
 cd frontend && npm run dev
@@ -90,7 +90,7 @@ start_demo.bat
 
 ```
 opsmind-rag/
-├── opmind/                          # 后端主包
+├── app/                          # 后端主包
 │   ├── config.py                    # 配置 (Pydantic Settings)
 │   ├── models/                      # 数据模型
 │   │   └── document.py              # Document, Chunk, Citation, SearchResult
@@ -121,9 +121,9 @@ opsmind-rag/
 │       └── types/index.ts           # TypeScript 类型
 ├── docker-compose.yml               # Milvus + 依赖容器
 ├── docs/                            # 设计文档
-│   ├── PRD_OpsMind_RAG.md
-│   ├── HLD_OpsMind_RAG.md
-│   └── LLD_OpsMind_RAG_0*.md
+│   ├── PRD_app_RAG.md
+│   ├── HLD_app_RAG.md
+│   └── LLD_app_RAG_0*.md
 ├── .env.example                     # 配置模板
 ├── start_demo.bat                   # Windows 一键启动脚本
 └── DEV_MANUAL.md                    # 本文件
@@ -200,8 +200,8 @@ event: error             → {"code": "INTERNAL", "message": "..."}
 实现 `BaseConnector` 接口：
 
 ```python
-from opmind.connectors.base import BaseConnector
-from opmind.models import Document
+from app.connectors.base import BaseConnector
+from app.models import Document
 
 class MyConnector(BaseConnector):
     connector_name = "my_source"
@@ -258,7 +258,7 @@ python scripts/smoke_test.py
 python scripts/ingest.py
 
 # 3. 启动后端开发模式
-uvicorn opmind.api.main:app --reload
+uvicorn app.api.main:app --reload
 
 # 4. 前端热更新开发
 cd frontend && npm run dev
@@ -280,7 +280,7 @@ curl -X POST http://localhost:8000/api/retrieve -H "Content-Type: application/js
 ## 5. 常见问题
 
 ### Q: 摄入时报 "CollectionExists" / 数据冲突
-重新摄入前清空旧数据：`python -c "from opmind.retrieval.vector_store import VectorStore; VectorStore().clear()"`
+重新摄入前清空旧数据：`python -c "from app.retrieval.vector_store import VectorStore; VectorStore().clear()"`
 
 ### Q: Milvus 连接失败
 确认 `docker compose ps` 容器都在运行。若 etcd 报错，尝试 `docker compose down && docker compose up -d`。

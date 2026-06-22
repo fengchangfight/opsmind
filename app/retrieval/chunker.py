@@ -1,5 +1,5 @@
-import re
-from opmind.models import Document, Chunk
+﻿import re
+from app.models import Document, Chunk
 
 
 class SimpleChunker:

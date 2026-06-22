@@ -1,6 +1,6 @@
-from typing import Optional
+﻿from typing import Optional
 from fastembed import TextEmbedding
-from opmind.config import settings
+from app.config import settings
 
 # Global lazy-loaded embedder
 _embedder: Optional[TextEmbedding] = None

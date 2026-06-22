@@ -1,6 +1,6 @@
-from abc import ABC, abstractmethod
+﻿from abc import ABC, abstractmethod
 from typing import AsyncIterator, Callable, Awaitable
-from opmind.models import Document
+from app.models import Document
 
 
 class BaseConnector(ABC):

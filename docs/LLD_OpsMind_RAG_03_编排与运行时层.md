@@ -22,7 +22,7 @@
 ## 2. 目录结构
 
 ```
-opmind/core/
+app/core/
 ├── __init__.py
 ├── agent_runtime.py        # AgentRuntime 主类
 ├── task_decomposer.py      # 任务分解

@@ -1,20 +1,20 @@
-"""
-Quick smoke test for OpsMind RAG backend.
+﻿"""
+Quick smoke test for app RAG backend.
 Tests: config loading, vector store read, retrieve API
 """
 import asyncio
 import sys
 sys.path.insert(0, ".")
 
-from opmind.config import settings
-from opmind.retrieval.vector_store import VectorStore
-from opmind.retrieval.embedder import Embedder
-from opmind.agents.retrieve_agent import RetrieveAgent
+from app.config import settings
+from app.retrieval.vector_store import VectorStore
+from app.retrieval.embedder import Embedder
+from app.agents.retrieve_agent import RetrieveAgent
 
 
 async def main():
     print("=" * 50)
-    print("OpsMind RAG - Smoke Test")
+    print("app RAG - Smoke Test")
     print("=" * 50)
 
     # 1. Config

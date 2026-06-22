@@ -23,7 +23,7 @@
 ## 2. 目录结构
 
 ```
-opmind/
+app/
 ├── retrieval/
 │   ├── __init__.py
 │   ├── milvus_store.py        # Milvus 混合检索封装

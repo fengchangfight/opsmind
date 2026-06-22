@@ -1,9 +1,9 @@
-import time
+﻿import time
 from typing import Optional
-from opmind.models import SearchResult, Citation
-from opmind.retrieval.embedder import Embedder
-from opmind.retrieval.vector_store import VectorStore
-from opmind.config import settings
+from app.models import SearchResult, Citation
+from app.retrieval.embedder import Embedder
+from app.retrieval.vector_store import VectorStore
+from app.config import settings
 
 
 class RetrieveAgent:

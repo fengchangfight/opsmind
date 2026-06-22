@@ -1,9 +1,9 @@
-import json
+﻿import json
 import asyncio
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import StreamingResponse
 from typing import Optional
-from opmind.agents import RetrieveAgent, ReasonAgent
+from app.agents import RetrieveAgent, ReasonAgent
 
 router = APIRouter(tags=["query"])
 

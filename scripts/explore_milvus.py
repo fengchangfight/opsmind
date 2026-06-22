@@ -1,19 +1,19 @@
-"""Milvus collection explorer - quick CLI to browse indexed chunks."""
+﻿"""Milvus collection explorer - quick CLI to browse indexed chunks."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from opmind.retrieval.vector_store import VectorStore
-from opmind.retrieval.embedder import Embedder
+from app.retrieval.vector_store import VectorStore
+from app.retrieval.embedder import Embedder
 
 
 def show_stats(vs: VectorStore):
     print(f"\n{'='*60}")
-    print(f"  Collection: opsmind_chunks  |  Chunks: {vs.count()}")
+    print(f"  Collection: app_chunks  |  Chunks: {vs.count()}")
     print(f"{'='*60}")
 
 def show_random(vs: VectorStore, n: int = 5):
     from pymilvus import MilvusClient
-    from opmind.config import settings
+    from app.config import settings
     client = MilvusClient(uri=f"http://{settings.milvus_host}:{settings.milvus_port}")
     results = client.query(
         collection_name=settings.milvus_collection_name,

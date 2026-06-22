@@ -1,9 +1,9 @@
-# OpsMind RAG
+﻿# app RAG
 
 > **Agentic RAG Platform for Enterprise Operations** — 混合检索 · 多 Agent 协作 · 流式推理 · 人机协作
 
 <p align="center">
-  <img src="docs/opsmind.png" alt="OpsMind Demo" width="800">
+  <img src="docs/app.png" alt="app Demo" width="800">
 </p>
 
 ---
@@ -72,13 +72,22 @@ cp .env.example .env
 
 ```bash
 # 后端
-uvicorn opmind.api.main:app --host 0.0.0.0 --port 8000
+uvicorn app.api.main:app --host 0.0.0.0 --port 8000
 
 # 前端（另开终端）
 cd frontend && npm install && npm run dev
 ```
 
 访问 `http://localhost:5173` 开始对话。
+
+### 5. Milvus 管理面板 (Attu)
+
+```bash
+# 已集成在 docker-compose 中
+docker compose up -d attu
+```
+
+访问 `http://localhost:8001` 浏览 `opsmind_chunks` collection，支持搜索、查看 schema、数据预览。
 
 ---
 
@@ -126,7 +135,7 @@ python scripts/explore_milvus.py search "deterministic evaluation CI flake"
 
 ```
 opsmind-rag/
-├── opmind/                          # 后端
+├── app/                             # 后端
 │   ├── config.py                    # 配置 (Pydantic Settings)
 │   ├── models/                      # Document, Chunk, Citation
 │   ├── connectors/                  # 可插拔数据接入层
@@ -148,13 +157,13 @@ opsmind-rag/
 
 | 文档 | 说明 |
 |------|------|
-| [PRD](docs/PRD_OpsMind_RAG.md) | 产品需求文档 |
-| [HLD](docs/HLD_OpsMind_RAG.md) | 总体架构设计 |
-| [LLD-01](docs/LLD_OpsMind_RAG_01_用户交互层.md) | 用户交互层详细设计 |
-| [LLD-02](docs/LLD_OpsMind_RAG_02_API网关层.md) | API 网关层详细设计 |
-| [LLD-03](docs/LLD_OpsMind_RAG_03_编排与运行时层.md) | 编排与运行时层详细设计 |
-| [LLD-04](docs/LLD_OpsMind_RAG_04_Agent层.md) | Agent 层详细设计 |
-| [LLD-05](docs/LLD_OpsMind_RAG_05_数据与基础设施层.md) | 数据与基础设施层详细设计 |
+| [PRD](docs/PRD_app_RAG.md) | 产品需求文档 |
+| [HLD](docs/HLD_app_RAG.md) | 总体架构设计 |
+| [LLD-01](docs/LLD_app_RAG_01_用户交互层.md) | 用户交互层详细设计 |
+| [LLD-02](docs/LLD_app_RAG_02_API网关层.md) | API 网关层详细设计 |
+| [LLD-03](docs/LLD_app_RAG_03_编排与运行时层.md) | 编排与运行时层详细设计 |
+| [LLD-04](docs/LLD_app_RAG_04_Agent层.md) | Agent 层详细设计 |
+| [LLD-05](docs/LLD_app_RAG_05_数据与基础设施层.md) | 数据与基础设施层详细设计 |
 | [DEV_MANUAL](DEV_MANUAL.md) | 开发手册 |
 | [DEPLOYMENT](DEPLOYMENT.md) | 生产部署文档 |
 

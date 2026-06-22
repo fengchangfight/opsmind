@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Request
-from opmind.api.schemas import RetrieveRequest
-from opmind.agents import RetrieveAgent
+﻿from fastapi import APIRouter, Request
+from app.api.schemas import RetrieveRequest
+from app.agents import RetrieveAgent
 
 router = APIRouter(tags=["retrieve"])
 

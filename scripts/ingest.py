@@ -1,13 +1,13 @@
-import asyncio
+﻿import asyncio
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from opmind.config import settings
-from opmind.connectors import TxtConnector
-from opmind.retrieval import SimpleChunker, Embedder, VectorStore
-from opmind.models import Chunk
+from app.config import settings
+from app.connectors import TxtConnector
+from app.retrieval import SimpleChunker, Embedder, VectorStore
+from app.models import Chunk
 
 
 async def main():

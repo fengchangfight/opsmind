@@ -1,4 +1,4 @@
-# OpsMind RAG — 生产部署文档 (DEPLOYMENT)
+﻿# app RAG — 生产部署文档 (DEPLOYMENT)
 
 **版本**: v0.1  
 **日期**: 2026-06-20  
@@ -8,7 +8,7 @@
 
 ## 1. 概述
 
-本文档描述如何将 OpsMind RAG 从 Demo 环境（Milvus Standalone）升级为生产级部署。
+本文档描述如何将 app RAG 从 Demo 环境（Milvus Standalone）升级为生产级部署。
 
 ---
 
@@ -170,11 +170,11 @@ RUN pip install --no-cache-dir \
     fastapi uvicorn[standard] pymilvus \
     pydantic-settings openai fastembed httpx
 
-COPY opmind/ ./opmind/
+COPY app/ ./app/
 COPY scripts/ ./scripts/
 
 EXPOSE 8000
-CMD ["uvicorn", "opmind.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ### 3.3 Dockerfile.frontend
@@ -246,12 +246,12 @@ server {
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: opsmind-api-hpa
+  name: app-api-hpa
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: opsmind-api
+    name: app-api
   minReplicas: 3
   maxReplicas: 10
   metrics:
@@ -266,7 +266,7 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: opsmind-config
+  name: app-config
 data:
   LLM_BASE_URL: "https://api.deepseek.com/v1"
   LLM_MODEL: "deepseek-v4-pro"
@@ -278,7 +278,7 @@ data:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: opsmind-secrets
+  name: app-secrets
 type: Opaque
 stringData:
   LLM_API_KEY: "<from-vault>"
@@ -325,10 +325,10 @@ stringData:
 
 | 指标 | 告警阈值 | 严重程度 |
 |------|---------|---------|
-| `opsmind_retrieval_latency_seconds` (p95) | > 500ms | Warning |
-| `opsmind_retrieval_latency_seconds` (p95) | > 2s | Critical |
-| `opsmind_agent_iterations_total` (avg) | > 3 | Warning |
-| `opsmind_tool_execution_total{status="failure"}` | > 5% of total | Critical |
+| `app_retrieval_latency_seconds` (p95) | > 500ms | Warning |
+| `app_retrieval_latency_seconds` (p95) | > 2s | Critical |
+| `app_agent_iterations_total` (avg) | > 3 | Warning |
+| `app_tool_execution_total{status="failure"}` | > 5% of total | Critical |
 | `http_server_duration_ms` (p99) | > 5s | Critical |
 | `milvus_num_entities` (delta) | < 0 for 10min | Warning (索引异常) |
 | `redis_connected_clients` | > 100 | Warning |
@@ -344,7 +344,7 @@ stringData:
 ### 6.3 链路追踪
 
 ```python
-# opmind/observability/tracer.py
+# app/observability/tracer.py
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import TracerProvider
@@ -377,7 +377,7 @@ trace.set_tracer_provider(provider)
 docker compose restart milvus
 
 # 2. 恢复 PostgreSQL
-pg_restore -h $DB_HOST -U opsmind -d opsmind backup.dump
+pg_restore -h $DB_HOST -U app -d app backup.dump
 
 # 3. 恢复 Redis
 docker compose stop redis
@@ -441,7 +441,7 @@ df -h /data
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 # 重启 API pods
-kubectl rollout restart deployment/opsmind-api
+kubectl rollout restart deployment/app-api
 ```
 
 ### 9.3 索引重建
@@ -449,7 +449,7 @@ kubectl rollout restart deployment/opsmind-api
 ```bash
 # 当向量质量下降或切换 Embedding 模型时
 # 1. 清空旧索引
-python -c "from opmind.retrieval.vector_store import VectorStore; VectorStore().clear()"
+python -c "from app.retrieval.vector_store import VectorStore; VectorStore().clear()"
 
 # 2. 重新摄入
 python scripts/ingest.py

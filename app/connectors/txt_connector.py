@@ -1,11 +1,11 @@
-import re
+﻿import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
-from opmind.connectors.base import BaseConnector
-from opmind.models import Document
+from app.connectors.base import BaseConnector
+from app.models import Document
 
 
 class TxtConnector(BaseConnector):

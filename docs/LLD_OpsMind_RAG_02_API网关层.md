@@ -25,7 +25,7 @@
 ## 2. 目录结构
 
 ```
-opmind/api/
+app/api/
 ├── __init__.py
 ├── main.py                       # FastAPI 实例 + 生命周期
 ├── routes/

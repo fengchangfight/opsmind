@@ -1,9 +1,9 @@
-from typing import Optional
+﻿from typing import Optional
 from pymilvus import (
     MilvusClient, DataType, AnnSearchRequest, RRFRanker,
 )
-from opmind.config import settings
-from opmind.models import Chunk, SearchResult
+from app.config import settings
+from app.models import Chunk, SearchResult
 
 
 DENSE_FIELD = "embedding_dense"
