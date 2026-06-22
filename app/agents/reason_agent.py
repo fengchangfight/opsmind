@@ -32,6 +32,95 @@ class ReasonAgent:
         self.orchestrator = orchestrator or ContextOrchestrator()
         self.mcp_manager = mcp_manager
         self.tool_registry = tool_registry
+        self._reason_graph = None  # Lazily built
+
+    async def reason_graph_stream(
+        self,
+        query: str,
+        results: list[SearchResult],
+        citations: list[Citation],
+        history: list[dict] | None = None,
+        event_queue=None,  # asyncio.Queue for SSE events
+        retriever=None,    # async callable (q, top_k) -> (results, citations)
+        session_id: str = "",
+    ):
+        """
+        Streaming reasoning via LangGraph with iterative deep-dive.
+        
+        Graph flow:
+        evaluate → assess_confidence → (finalize | generate_gaps → re_retrieve → loop | interrupt)
+        
+        Args:
+            retriever: async fn(query, top_k) -> (SearchResult[], Citation[])
+        """
+        from app.agents.reason_graph import build_reason_graph
+
+        if retriever is None:
+            # Fallback to simple linear flow
+            async for token in self.reason_stream(query, results, citations, history, event_queue):
+                yield token
+            return
+
+        if self._reason_graph is None:
+            self._reason_graph = await build_reason_graph(
+                llm_client=self.client,
+                retriever=retriever,
+                model=self.model,
+                checkpoint_path=f"./data/langgraph_{session_id or 'default'}.db",
+            )
+
+        doc_texts = [
+            f"[{c.citation_id}] {r.doc_title}\n{r.content}"
+            for r, c in zip(results, citations)
+        ]
+
+        initial_state: dict = {
+            "query": query,
+            "context": doc_texts,
+            "citations": [c.model_dump() for c in citations],
+            "answer": "",
+            "confidence": 0.0,
+            "iteration": 0,
+            "max_iterations": 3,
+            "gaps": [],
+            "status": "running",
+        }
+
+        config = {"configurable": {"thread_id": session_id or "default"}}
+
+        if event_queue:
+            event_queue.put_nowait(("agent_start", {"agent_id": "reason_graph"}))
+            event_queue.put_nowait(("reasoning_step", {
+                "step": 0, "confidence": 0.0, "iteration": 0, "max_iterations": 3,
+                "message": "开始迭代推理...",
+            }))
+
+        try:
+            final_state = await self._reason_graph.ainvoke(initial_state, config)
+        except Exception as e:
+            # Interrupt — the graph paused at interrupt node
+            if "interrupt" in str(e).lower():
+                if event_queue:
+                    event_queue.put_nowait(("interrupted", {
+                        "reason": f"置信度不足，需要人工确认",
+                        "confidence": 0.0,
+                        "options": ["continue", "modify", "transfer"],
+                    }))
+                return
+            raise
+
+        answer = final_state.get("answer", "")
+        confidence = final_state.get("confidence", 0)
+        status = final_state.get("status", "finalized")
+
+        if event_queue:
+            event_queue.put_nowait(("reasoning_step", {
+                "step": final_state.get("iteration", 0),
+                "confidence": confidence,
+                "status": status,
+            }))
+
+        yield answer
 
     async def reason_stream(
         self,

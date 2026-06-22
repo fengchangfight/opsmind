@@ -40,6 +40,7 @@ export default function Chat({ onLogout }: Props) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<Record<string, any>>({});
+  const [useLangGraph, setUseLangGraph] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -101,6 +102,7 @@ export default function Chat({ onLogout }: Props) {
     params.set('query', query);
     params.set('top_k', '5');
     if (sessionId) params.set('session_id', sessionId);
+    if (useLangGraph) params.set('langgraph', '1');
 
     const handler = (event: string, data: any) => {
       switch (event) {
@@ -138,6 +140,24 @@ export default function Chat({ onLogout }: Props) {
 
         case 'tool_result':
           streamContent += `📋 **结果**: ${(data.result || '').slice(0, 300)}\n\n`;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiMsg.id ? { ...m, content: streamContent, isStreaming: true } : m
+            )
+          );
+          break;
+
+        case 'reasoning_step':
+          streamContent += `\n🔄 **迭代 ${data.step + 1}/${data.max_iterations}** — 置信度: ${(data.confidence * 100).toFixed(0)}%\n`;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiMsg.id ? { ...m, content: streamContent, isStreaming: true } : m
+            )
+          );
+          break;
+
+        case 'interrupted':
+          streamContent += `\n⏸️ **中断**: ${data.reason}\n`;
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiMsg.id ? { ...m, content: streamContent, isStreaming: true } : m
@@ -249,6 +269,16 @@ export default function Chat({ onLogout }: Props) {
                 thinking...
               </span>
             )}
+            <button
+              onClick={() => setUseLangGraph(!useLangGraph)}
+              className={`px-2 py-0.5 rounded text-xs font-medium border ${
+                useLangGraph
+                  ? 'bg-orange-100 text-orange-700 border-orange-300'
+                  : 'text-gray-400 border-gray-200'
+              }`}
+            >
+              LangGraph {useLangGraph ? 'ON' : 'OFF'}
+            </button>
             <span className="text-xs text-gray-500">
               {JSON.parse(localStorage.getItem('opsmind_user') || '{}').display_name || ''}
             </span>

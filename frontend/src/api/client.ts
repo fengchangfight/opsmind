@@ -14,7 +14,7 @@ export function connectSSE(url: string, handler: EventHandler): void {
   const sep = url.includes('?') ? '&' : '?';
   eventSource = new EventSource(token ? `${url}${sep}_token=${encodeURIComponent(token)}` : url);
 
-  const events = ['agent_start', 'retrieval_result', 'chunk', 'final_answer', 'error', 'tool_call', 'tool_result'] as const;
+  const events = ['agent_start', 'retrieval_result', 'chunk', 'final_answer', 'error', 'tool_call', 'tool_result', 'reasoning_step', 'interrupted'] as const;
 
   events.forEach((eventName) => {
     eventSource!.addEventListener(eventName, (e: MessageEvent) => {

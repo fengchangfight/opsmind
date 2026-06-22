@@ -18,6 +18,7 @@ async def query(
     category: Optional[str] = Query(default=None),
     history: Optional[str] = Query(default=None),
     session_id: Optional[str] = Query(default=None),
+    langgraph: int = Query(default=0, ge=0, le=1, description="Use LangGraph iterative reasoning"),
 ):
     runtime = http_request.app.state.runtime
     retrieve_agent: RetrieveAgent = runtime["retrieve"]
@@ -49,10 +50,18 @@ async def query(
     # Start reasoning in background
     async def run_reason():
         full_answer = ""
-        async for token in reason_agent.reason_stream(
-            q, results, citations, messages_history, tool_event_queue,
-        ):
-            full_answer += token
+        if langgraph:
+            async for token in reason_agent.reason_graph_stream(
+                q, results, citations, messages_history, tool_event_queue,
+                retriever=lambda q, k: retrieve_agent.retrieve(q, k),
+                session_id=sid,
+            ):
+                full_answer += token
+        else:
+            async for token in reason_agent.reason_stream(
+                q, results, citations, messages_history, tool_event_queue,
+            ):
+                full_answer += token
         tool_event_queue.put_nowait(("done", {"answer": full_answer}))
 
     reason_task = asyncio.create_task(run_reason())
@@ -76,6 +85,12 @@ async def query(
 
                 elif event_type == "tool_call_result":
                     yield f"event: tool_result\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+                elif event_type == "reasoning_step":
+                    yield f"event: reasoning_step\ndata: {json.dumps(data)}\n\n"
+
+                elif event_type == "interrupted":
+                    yield f"event: interrupted\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
                 elif event_type == "chunk":
                     yield f"event: chunk\ndata: {json.dumps({'content': data['content']})}\n\n"
