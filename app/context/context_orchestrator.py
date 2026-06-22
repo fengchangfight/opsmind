@@ -37,10 +37,12 @@ class ContextOrchestrator:
 
         # Persist compaction result
         if result and result.summary and self._repo and self._session_id:
+            # Determine the last message id: count messages before compaction
+            total_msgs = len(messages)
             self._repo.save_compaction(
                 session_id=self._session_id,
                 summary=result.summary,
-                last_message_id=0,
+                last_message_id=max(1, total_msgs // 2),  # Approximate midpoint
                 pre_tokens=result.pre_tokens,
                 post_tokens=result.post_tokens,
                 reason=result.reason,

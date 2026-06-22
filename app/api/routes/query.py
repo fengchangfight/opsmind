@@ -34,7 +34,7 @@ async def query(
     if category:
         filters = {"category": category}
 
-    messages_history = repo.get_messages_for_llm_with_compaction(sid, reason_agent.SYSTEM_PROMPT)
+    messages_history = repo.get_messages_for_llm_with_compaction(sid)
     if history and len(messages_history) <= 2:
         try:
             messages_history = json.loads(base64.b64decode(history).decode())
