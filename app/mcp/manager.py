@@ -46,10 +46,15 @@ class McpManager:
         await self._wait_for_connections(timeout=15)
 
     async def stop_all(self):
-        """Disconnect all servers."""
+        """Disconnect all servers (fast shutdown)."""
         self._started = False
-        for task in self._servers.values():
-            await task.stop()
+        import asyncio
+        # Stop in parallel with timeout
+        tasks = [asyncio.create_task(t.stop()) for t in list(self._servers.values())]
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=2.0)
+            for t in pending:
+                t.cancel()
         self._servers.clear()
         logger.info("[MCP] All servers stopped")
 

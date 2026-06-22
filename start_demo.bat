@@ -24,7 +24,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [START] Starting backend on http://localhost:8000
-start "OpsMind Backend" cmd /k "uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload"
+start "OpsMind Backend" cmd /k "uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app --reload-dir scripts"
 
 echo [START] Starting frontend on http://localhost:5173
 start "OpsMind Frontend" cmd /k "cd frontend && npx vite --host"

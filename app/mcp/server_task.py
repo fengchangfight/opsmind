@@ -54,8 +54,8 @@ class McpServerTask:
         if self._task:
             self._task.cancel()
             try:
-                await self._task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(self._task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
         await self._disconnect()
 

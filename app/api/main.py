@@ -66,7 +66,9 @@ async def lifespan(app: FastAPI):
     }
 
     # Start MCP servers in background (non-blocking)
-    asyncio.create_task(mcp_manager.start_all())
+    mcp_startup_task = asyncio.create_task(mcp_manager.start_all())
+    # Store for cleanup
+    app.state._mcp_startup = mcp_startup_task
 
     doc_count = vector_store.count()
     print(f"[OpsMind] Vector store contains {doc_count} chunks")
@@ -75,6 +77,14 @@ async def lifespan(app: FastAPI):
     yield
 
     print("[OpsMind] Shutting down...")
+    # Cancel background tasks
+    mcp_startup_task.cancel()
+    for task in asyncio.all_tasks():
+        if task is not asyncio.current_task() and not task.done():
+            task.cancel()
+    await asyncio.sleep(0.5)
+    await mcp_manager.stop_all()
+    print("[OpsMind] Shutdown complete")
 
 
 app = FastAPI(
