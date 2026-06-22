@@ -15,7 +15,10 @@ Adding a new tool:
 
 See: docs/LLD_OpsMind_RAG_04_Agent层.md §5 ExecuteAgent for production design (circuit breaker, rate limiting).
 """
-from app.tools.base import BaseTool
+from app.tools.base import BaseTool, PermissionChecker, AllowAllPermissionChecker, CircuitBreaker
 from app.tools.registry import ToolRegistry, create_default_registry
 
-__all__ = ["BaseTool", "ToolRegistry", "create_default_registry"]
+__all__ = [
+    "BaseTool", "PermissionChecker", "AllowAllPermissionChecker", "CircuitBreaker",
+    "ToolRegistry", "create_default_registry",
+]
