@@ -1,8 +1,10 @@
 ﻿import json
 import time
+from typing import Optional
 from openai import AsyncOpenAI
 from app.models import SearchResult, Citation
 from app.config import settings
+from app.context import ContextOrchestrator
 
 
 SYSTEM_PROMPT = """You are OpsMind, an expert SRE / DevOps assistant. Answer the user's question based on the provided context documents.
@@ -17,44 +19,13 @@ Rules:
 
 
 class ReasonAgent:
-    def __init__(self):
+    def __init__(self, orchestrator: ContextOrchestrator | None = None):
         self.client = AsyncOpenAI(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
         )
         self.model = settings.llm_model
-
-    async def reason(
-        self,
-        query: str,
-        results: list[SearchResult],
-        citations: list[Citation],
-    ) -> dict:
-        t0 = time.monotonic()
-
-        context = self._build_context(results, citations)
-        user_message = self._build_user_message(query, context)
-
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=0.3,
-            max_tokens=2048,
-        )
-
-        answer = response.choices[0].message.content or ""
-        latency = time.monotonic() - t0
-
-        return {
-            "answer": answer,
-            "citations": [c.model_dump() for c in citations],
-            "latency_seconds": round(latency, 2),
-            "model": self.model,
-            "num_sources": len(results),
-        }
+        self.orchestrator = orchestrator or ContextOrchestrator()
 
     async def reason_stream(
         self,
@@ -63,13 +34,28 @@ class ReasonAgent:
         citations: list[Citation],
         history: list[dict] | None = None,
     ):
-        context = self._build_context(results, citations)
-        user_message = self._build_user_message(query, context)
+        """Stream LLM response with context-aware message building."""
+        # Build document texts for retrieval injection
+        doc_texts = [
+            f"[{c.citation_id}] Source: {r.doc_title}\nContent: {r.content}"
+            for r, c in zip(results, citations)
+        ]
 
-        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # Build base messages: system + history
+        base_messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
         if history:
-            messages.extend(history[-10:])  # 最近 10 轮
-        messages.append({"role": "user", "content": user_message})
+            base_messages.extend(history)
+
+        # Use orchestrator to handle compaction + doc injection
+        messages = await self.orchestrator.build_context(
+            messages=base_messages,
+            retrieved_docs=doc_texts,
+            llm_client=self.client,
+            model=self.model,
+        )
+
+        # Append the actual user query as the final message
+        messages.append({"role": "user", "content": query})
 
         stream = await self.client.chat.completions.create(
             model=self.model,
@@ -82,21 +68,3 @@ class ReasonAgent:
         async for chunk in stream:
             if chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
-
-    def _build_context(self, results: list[SearchResult], citations: list[Citation]) -> str:
-        parts = []
-        for i, (r, c) in enumerate(zip(results, citations)):
-            parts.append(
-                f"[{c.citation_id}] Source: {r.doc_title}\n"
-                f"Content: {r.content}\n"
-                f"Relevance: {r.score:.2f}"
-            )
-        return "\n\n---\n\n".join(parts)
-
-    def _build_user_message(self, query: str, context: str) -> str:
-        return f"""Context documents:
-{context}
-
-User question: {query}
-
-Please answer based on the context above. Cite sources with [number] notation."""
