@@ -1,6 +1,11 @@
 ﻿from contextlib import asynccontextmanager
 import asyncio
+import logging
+import os
 from fastapi import FastAPI
+
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
