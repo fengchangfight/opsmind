@@ -5,6 +5,7 @@ import os
 from fastapi import FastAPI
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 from fastapi.middleware.cors import CORSMiddleware
 
