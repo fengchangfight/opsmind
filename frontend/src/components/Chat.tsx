@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Message, Citation } from '../types';
-import { connectSSE, disconnectSSE, fetchSessions, fetchSession } from '../api/client';
+import { connectSSE, disconnectSSE, fetchSessions, fetchSession, getMcpStatus } from '../api/client';
 
 let msgIdCounter = 0;
 function nextId(): string {
@@ -39,6 +39,7 @@ export default function Chat({ onLogout }: Props) {
   const [sessionId, setSessionId] = useState<string>(loadStoredSid() || '');
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [mcpStatus, setMcpStatus] = useState<Record<string, any>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -47,17 +48,15 @@ export default function Chat({ onLogout }: Props) {
 
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
-  // Load session list + current session on mount
+  // Load session list + MCP status on mount
   useEffect(() => {
     fetchSessions().then((list) => {
       setSessions(list);
       const cur = list.find((s: SessionMeta) => s.session_id === sessionId);
-      if (cur) {
-        loadSession(cur.session_id);
-      } else {
-        setLoaded(true);
-      }
+      if (cur) loadSession(cur.session_id);
+      else setLoaded(true);
     });
+    getMcpStatus().then((s) => setMcpStatus(s.servers || {}));
   }, []);
 
   async function loadSession(sid: string) {
@@ -118,6 +117,27 @@ export default function Chat({ onLogout }: Props) {
 
         case 'chunk':
           streamContent += data.content || '';
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiMsg.id ? { ...m, content: streamContent, isStreaming: true } : m
+            )
+          );
+          break;
+
+        case 'tool_call':
+          streamContent += `\n\n🔧 **调用工具**: \`${data.tool_name}\`\n`;
+          if (data.arguments && Object.keys(data.arguments).length > 0) {
+            streamContent += `参数: \`${JSON.stringify(data.arguments)}\`\n`;
+          }
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiMsg.id ? { ...m, content: streamContent, isStreaming: true } : m
+            )
+          );
+          break;
+
+        case 'tool_result':
+          streamContent += `📋 **结果**: ${(data.result || '').slice(0, 300)}\n\n`;
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiMsg.id ? { ...m, content: streamContent, isStreaming: true } : m
@@ -207,6 +227,18 @@ export default function Chat({ onLogout }: Props) {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {/* MCP Status */}
+            {Object.entries(mcpStatus).map(([name, s]) => (
+              <span
+                key={name}
+                className={`px-2 py-0.5 rounded text-xs font-medium ${
+                  s.connected ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-400'
+                }`}
+                title={`MCP: ${name} (${s.tools_count} tools)`}
+              >
+                {s.connected ? '🔌' : '🔌'} {name}
+              </span>
+            ))}
             {Array.from(activeAgents).map((a) => (
               <span key={a} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
                 {a}

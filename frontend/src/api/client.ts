@@ -14,7 +14,7 @@ export function connectSSE(url: string, handler: EventHandler): void {
   const sep = url.includes('?') ? '&' : '?';
   eventSource = new EventSource(token ? `${url}${sep}_token=${encodeURIComponent(token)}` : url);
 
-  const events = ['agent_start', 'retrieval_result', 'chunk', 'final_answer', 'error'] as const;
+  const events = ['agent_start', 'retrieval_result', 'chunk', 'final_answer', 'error', 'tool_call', 'tool_result'] as const;
 
   events.forEach((eventName) => {
     eventSource!.addEventListener(eventName, (e: MessageEvent) => {
@@ -57,4 +57,11 @@ export async function deleteSession(sessionId: string): Promise<void> {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${getToken()}` },
   });
+}
+
+export async function getMcpStatus(): Promise<any> {
+  const res = await fetch('/api/mcp/status', {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  return res.json();
 }

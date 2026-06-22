@@ -16,7 +16,7 @@ async def query(
     q: str = Query(..., min_length=1, max_length=4096, alias="query"),
     top_k: int = Query(default=5, ge=1, le=20),
     category: Optional[str] = Query(default=None),
-    history: Optional[str] = Query(default=None, description="Base64 JSON chat history"),
+    history: Optional[str] = Query(default=None),
     session_id: Optional[str] = Query(default=None),
 ):
     runtime = http_request.app.state.runtime
@@ -24,13 +24,8 @@ async def query(
     reason_agent: ReasonAgent = runtime["reason"]
     repo = get_repo()
 
-    # Get authenticated user
     user_id = getattr(http_request.state, "user_id", "default")
-
-    # Ensure session exists
     sid = session_id or repo.create_session(user_id)
-
-    # Save user message
     repo.save_message(sid, "user", q)
     if not session_id:
         repo.auto_title(sid, q)
@@ -39,7 +34,6 @@ async def query(
     if category:
         filters = {"category": category}
 
-    # Load history from DB (preferred) or from client (fallback)
     messages_history = repo.get_messages_for_llm(sid)
     if history and len(messages_history) <= 2:
         try:
@@ -47,41 +41,64 @@ async def query(
         except Exception:
             pass
 
-    results, citations, retrieve_latency = await retrieve_agent.retrieve(
-        query=q,
-        top_k=top_k,
-        filters=filters,
-    )
+    results, citations, retrieve_latency = await retrieve_agent.retrieve(query=q, top_k=top_k, filters=filters)
+
+    # Queue for tool events (cross-asyncio-task communication)
+    tool_event_queue: asyncio.Queue = asyncio.Queue()
+
+    # Start reasoning in background
+    async def run_reason():
+        full_answer = ""
+        async for token in reason_agent.reason_stream(
+            q, results, citations, messages_history, tool_event_queue,
+        ):
+            full_answer += token
+        tool_event_queue.put_nowait(("done", {"answer": full_answer}))
+
+    reason_task = asyncio.create_task(run_reason())
 
     async def event_generator():
         try:
             yield f"event: agent_start\ndata: {json.dumps({'agent_id': 'retrieve', 'session_id': sid})}\n\n"
-
-            retrieval_data = {
-                "num_results": len(results),
-                "latency_ms": round(retrieve_latency * 1000, 1),
-            }
-            yield f"event: retrieval_result\ndata: {json.dumps(retrieval_data)}\n\n"
-
+            yield f"event: retrieval_result\ndata: {json.dumps({'num_results': len(results), 'latency_ms': round(retrieve_latency * 1000, 1)})}\n\n"
             yield f"event: agent_start\ndata: {json.dumps({'agent_id': 'reason'})}\n\n"
 
             full_answer = ""
-            async for token in reason_agent.reason_stream(q, results, citations, messages_history):
-                full_answer += token
-                yield f"event: chunk\ndata: {json.dumps({'content': token})}\n\n"
-                await asyncio.sleep(0)
+            while True:
+                try:
+                    event_type, data = await asyncio.wait_for(tool_event_queue.get(), timeout=120)
+                except asyncio.TimeoutError:
+                    yield f"event: error\ndata: {json.dumps({'code': 'TIMEOUT', 'message': '请求超时'})}\n\n"
+                    break
 
-            # Save assistant response
-            repo.save_message(sid, "assistant", full_answer, [c.model_dump() for c in citations])
+                if event_type == "tool_call_start":
+                    yield f"event: tool_call\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-            final_data = {
-                "answer": full_answer,
-                "citations": [c.model_dump() for c in citations],
-                "num_sources": len(results),
-                "model": reason_agent.model,
-                "session_id": sid,
-            }
-            yield f"event: final_answer\ndata: {json.dumps(final_data, ensure_ascii=False)}\n\n"
+                elif event_type == "tool_call_result":
+                    yield f"event: tool_result\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+                elif event_type == "chunk":
+                    yield f"event: chunk\ndata: {json.dumps({'content': data['content']})}\n\n"
+                    full_answer = data["content"]
+
+                elif event_type == "done":
+                    full_answer = data["answer"]
+                    repo.save_message(sid, "assistant", full_answer, [c.model_dump() for c in citations])
+                    final_data = {
+                        "answer": full_answer,
+                        "citations": [c.model_dump() for c in citations],
+                        "num_sources": len(results),
+                        "model": reason_agent.model,
+                        "session_id": sid,
+                    }
+                    yield f"event: final_answer\ndata: {json.dumps(final_data, ensure_ascii=False)}\n\n"
+                    break
+
+                elif event_type == "error":
+                    yield f"event: error\ndata: {json.dumps(data)}\n\n"
+                    break
+
+            await reason_task
 
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'code': 'INTERNAL', 'message': str(e)})}\n\n"
@@ -89,9 +106,5 @@ async def query(
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )

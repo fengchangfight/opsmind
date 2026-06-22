@@ -7,20 +7,28 @@ from app.config import settings
 from app.persistence import get_repo
 from app.retrieval import Embedder, VectorStore
 from app.agents import RetrieveAgent, ReasonAgent
-from app.api.routes import query, retrieve, resume, sessions, auth
+from app.api.routes import query, retrieve, resume, sessions, auth, mcp
 from app.api.auth import AuthMiddleware
 from app.mcp import McpManager
 
 
 def _load_demo_mcp_servers(manager: McpManager):
-    """Load demo MCP servers from config. No-op if none configured."""
+    """Load demo MCP servers. Always includes the built-in demo server for testing."""
+    # Built-in demo server
+    from app.mcp.config import McpServerConfig, StdioConfig
+    manager.add_server(McpServerConfig(
+        name="demo",
+        description="Demo MCP server with echo + sysinfo tools",
+        transport=StdioConfig(command="python", args=["scripts/demo_mcp_server.py"]),
+    ))
+
+    # Additional servers from config
     for cfg_data in settings.mcp_servers:
         try:
-            from app.mcp.config import McpServerConfig
             cfg = McpServerConfig(**cfg_data)
             manager.add_server(cfg)
         except Exception as e:
-            print(f"[OpsMind] Failed to load MCP server config: {e}")
+            print(f"[OpsMind] Failed to load MCP server: {e}")
 
 
 @asynccontextmanager
@@ -81,6 +89,7 @@ app.include_router(query.router, prefix="/api")
 app.include_router(retrieve.router, prefix="/api")
 app.include_router(resume.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
+app.include_router(mcp.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 
 
