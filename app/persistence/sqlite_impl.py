@@ -59,6 +59,18 @@ class SqliteSessionRepository(SessionRepository):
             );
             CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id, id);
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at);
+
+            CREATE TABLE IF NOT EXISTS compactions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id      TEXT NOT NULL REFERENCES sessions(session_id),
+                summary         TEXT NOT NULL DEFAULT '',
+                last_message_id INTEGER NOT NULL DEFAULT 0,
+                pre_tokens      INTEGER NOT NULL DEFAULT 0,
+                post_tokens     INTEGER NOT NULL DEFAULT 0,
+                reason          TEXT NOT NULL DEFAULT 'auto',
+                created_at      TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_comp_session ON compactions(session_id, id);
         """)
 
         # Seed demo users (idempotent)
@@ -146,6 +158,42 @@ class SqliteSessionRepository(SessionRepository):
         conn.close()
         return [{"role": r["role"], "content": r["content"]} for r in rows]
 
+    def get_messages_for_llm_with_compaction(self, session_id: str, system_msg: str = "") -> list[dict]:
+        """
+        Load messages with compaction awareness.
+        
+        If a compaction exists for this session, return:
+            [system_msg] + [compaction_summary] + [messages after compaction]
+        Otherwise, return all messages.
+        """
+        comp = self.get_latest_compaction(session_id)
+
+        if comp and comp["summary"]:
+            result: list[dict] = []
+            if system_msg:
+                result.append({"role": "system", "content": system_msg})
+            result.append({
+                "role": "system",
+                "content": (
+                    "<conversation-summary>\n"
+                    f"{comp['summary']}\n"
+                    "</conversation-summary>\n\n"
+                    "[System note: The above summarizes earlier conversation. "
+                    "The following messages are the recent context.]"
+                ),
+            })
+            # Load messages AFTER the compaction point
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT role, content FROM messages WHERE session_id = ? AND id > ? ORDER BY id ASC",
+                (session_id, comp["last_message_id"]),
+            ).fetchall()
+            conn.close()
+            result.extend([{"role": r["role"], "content": r["content"]} for r in rows])
+            return result
+
+        return self.get_messages_for_llm(session_id)
+
     def auto_title(self, session_id: str, first_message: str):
         title = first_message.strip()[:60]
         if len(first_message.strip()) > 60:
@@ -188,6 +236,25 @@ class SqliteSessionRepository(SessionRepository):
         row = conn.execute(
             "SELECT user_id, username, display_name, role FROM users WHERE user_id = ?",
             (user_id,),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def save_compaction(self, session_id: str, summary: str, last_message_id: int,
+                        pre_tokens: int, post_tokens: int, reason: str):
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT INTO compactions (session_id, summary, last_message_id, pre_tokens, post_tokens, reason, created_at) VALUES (?,?,?,?,?,?,?)",
+            (session_id, summary, last_message_id, pre_tokens, post_tokens, reason, _now()),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_latest_compaction(self, session_id: str) -> dict | None:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM compactions WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+            (session_id,),
         ).fetchone()
         conn.close()
         return dict(row) if row else None

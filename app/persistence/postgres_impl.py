@@ -179,6 +179,36 @@ class PostgresSessionRepository(SessionRepository):
         )
         return [{"role": r["role"], "content": r["content"]} for r in rows]
 
+    def get_messages_for_llm_with_compaction(self, session_id: str, system_msg: str = "") -> list[dict]:
+        import asyncio
+        return asyncio.get_event_loop().run_until_complete(
+            self._get_messages_for_llm_with_compaction(session_id, system_msg)
+        )
+
+    async def _get_messages_for_llm_with_compaction(self, session_id: str, system_msg: str) -> list[dict]:
+        comp = self.get_latest_compaction(session_id)
+        if comp and comp["summary"]:
+            result = []
+            if system_msg:
+                result.append({"role": "system", "content": system_msg})
+            result.append({
+                "role": "system",
+                "content": (
+                    "<conversation-summary>\n"
+                    f"{comp['summary']}\n"
+                    "</conversation-summary>\n\n"
+                    "[System note: The above summarizes earlier conversation. "
+                    "The following messages are the recent context.]"
+                ),
+            })
+            rows = await self._fetch(
+                "SELECT role, content FROM messages WHERE session_id = $1 AND id > $2 ORDER BY id ASC",
+                session_id, comp["last_message_id"],
+            )
+            result.extend([{"role": r["role"], "content": r["content"]} for r in rows])
+            return result
+        return await self._get_messages_for_llm(session_id)
+
     def auto_title(self, session_id: str, first_message: str):
         import asyncio
         asyncio.get_event_loop().run_until_complete(
@@ -229,5 +259,30 @@ class PostgresSessionRepository(SessionRepository):
         row = await self._fetchrow(
             "SELECT user_id, username, display_name, role FROM users WHERE user_id = $1",
             user_id,
+        )
+        return dict(row) if row else None
+
+    def save_compaction(self, session_id: str, summary: str, last_message_id: int,
+                        pre_tokens: int, post_tokens: int, reason: str):
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(
+            self._save_compaction(session_id, summary, last_message_id, pre_tokens, post_tokens, reason)
+        )
+
+    async def _save_compaction(self, session_id: str, summary: str, last_message_id: int,
+                               pre_tokens: int, post_tokens: int, reason: str):
+        await self._execute(
+            "INSERT INTO compactions (session_id, summary, last_message_id, pre_tokens, post_tokens, reason, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+            session_id, summary, last_message_id, pre_tokens, post_tokens, reason, _now(),
+        )
+
+    def get_latest_compaction(self, session_id: str) -> dict | None:
+        import asyncio
+        return asyncio.get_event_loop().run_until_complete(self._get_latest_compaction(session_id))
+
+    async def _get_latest_compaction(self, session_id: str) -> dict | None:
+        row = await self._fetchrow(
+            "SELECT * FROM compactions WHERE session_id = $1 ORDER BY id DESC LIMIT 1",
+            session_id,
         )
         return dict(row) if row else None

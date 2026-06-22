@@ -20,6 +20,8 @@ Rules:
 
 
 class ReasonAgent:
+    SYSTEM_PROMPT = SYSTEM_PROMPT
+
     def __init__(self, orchestrator: ContextOrchestrator | None = None, mcp_manager: McpManager | None = None):
         self.client = AsyncOpenAI(
             api_key=settings.llm_api_key,

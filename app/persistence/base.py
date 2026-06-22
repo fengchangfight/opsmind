@@ -49,6 +49,11 @@ class SessionRepository(ABC):
         ...
 
     @abstractmethod
+    def get_messages_for_llm_with_compaction(self, session_id: str, system_msg: str = "") -> list[dict]:
+        """Get messages with compaction awareness: system + summary + recent tail."""
+        ...
+
+    @abstractmethod
     def auto_title(self, session_id: str, first_message: str):
         """Derive session title from first user message."""
         ...
@@ -61,6 +66,17 @@ class SessionRepository(ABC):
     @abstractmethod
     def get_user(self, user_id: str) -> Optional[dict]:
         """Get user by id."""
+        ...
+
+    @abstractmethod
+    def save_compaction(self, session_id: str, summary: str, last_message_id: int,
+                        pre_tokens: int, post_tokens: int, reason: str):
+        """Save compaction result for session resume."""
+        ...
+
+    @abstractmethod
+    def get_latest_compaction(self, session_id: str) -> Optional[dict]:
+        """Get the most recent compaction for a session."""
         ...
 
     @abstractmethod

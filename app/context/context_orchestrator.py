@@ -17,6 +17,13 @@ class ContextOrchestrator:
         self.budget = budget or TokenBudget()
         self.compactor = compactor or ConversationCompactor(self.budget)
         self.trigger = trigger or CompactionTrigger(self.budget, self.compactor)
+        self._session_id: str = ""
+        self._repo = None
+
+    def set_session_context(self, session_id: str, repo):
+        """Set session context for compaction persistence."""
+        self._session_id = session_id
+        self._repo = repo
 
     async def build_context(
         self,
@@ -25,14 +32,19 @@ class ContextOrchestrator:
         llm_client,
         model: str,
     ) -> list[dict]:
-        """
-        Build final LLM context messages:
-        1. Preflight compaction if needed
-        2. Trim retrieved docs to retrieval_budget
-        3. Inject docs as system message
-        """
         # Step 1: Preflight compaction
-        messages, _ = await self.trigger.preflight(messages, llm_client, model)
+        messages, result = await self.trigger.preflight(messages, llm_client, model)
+
+        # Persist compaction result
+        if result and result.summary and self._repo and self._session_id:
+            self._repo.save_compaction(
+                session_id=self._session_id,
+                summary=result.summary,
+                last_message_id=0,
+                pre_tokens=result.pre_tokens,
+                post_tokens=result.post_tokens,
+                reason=result.reason,
+            )
 
         # Step 2: Trim retrieved docs
         doc_budget = self.budget.retrieval_budget
@@ -63,6 +75,5 @@ class ContextOrchestrator:
         self, messages: list[dict], retrieved_docs: list[str],
         llm_client, model: str,
     ) -> list[dict]:
-        """Overflow recovery: aggressive compaction then rebuild context."""
         messages, _ = await self.trigger.overflow(messages, llm_client, model)
         return await self.build_context(messages, retrieved_docs, llm_client, model)

@@ -34,7 +34,7 @@ async def query(
     if category:
         filters = {"category": category}
 
-    messages_history = repo.get_messages_for_llm(sid)
+    messages_history = repo.get_messages_for_llm_with_compaction(sid, reason_agent.SYSTEM_PROMPT)
     if history and len(messages_history) <= 2:
         try:
             messages_history = json.loads(base64.b64decode(history).decode())
@@ -92,6 +92,9 @@ async def query(
                         "session_id": sid,
                     }
                     yield f"event: final_answer\ndata: {json.dumps(final_data, ensure_ascii=False)}\n\n"
+
+                    # Background: check if compaction is needed and persist
+                    asyncio.create_task(_maybe_compact(sid, repo, reason_agent, results, citations))
                     break
 
                 elif event_type == "error":
@@ -108,3 +111,37 @@ async def query(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+async def _maybe_compact(sid: str, repo, reason_agent, results, citations):
+    """
+    Background task: check if session messages need compaction and persist.
+    Triggered when message count exceeds threshold.
+    """
+    try:
+        messages = repo.get_messages_for_llm(sid)
+        if len(messages) < 20:
+            return  # Not enough messages to warrant compaction
+
+        total_tokens = sum(len(m.get("content", "")) // 4 for m in messages)
+        if total_tokens < reason_agent.orchestrator.budget.compaction_threshold:
+            return
+
+        doc_texts = [
+            f"[{c.citation_id}] {r.doc_title}\n{r.content}"
+            for r, c in zip(results, citations)
+        ]
+        result = await reason_agent.orchestrator.compactor.compact(
+            messages, reason_agent.client, reason_agent.model, reason="post_turn",
+        )
+        if result and result.summary:
+            repo.save_compaction(
+                session_id=sid,
+                summary=result.summary,
+                last_message_id=len(messages),
+                pre_tokens=result.pre_tokens,
+                post_tokens=result.post_tokens,
+                reason="post_turn",
+            )
+    except Exception:
+        pass  # Background task: never break the main flow
