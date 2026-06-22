@@ -23,6 +23,8 @@ class Reranker:
         if self._model is not None:
             return
         try:
+            import os
+            os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
             from sentence_transformers import CrossEncoder
             self._model = CrossEncoder(self.model_name)
             logger.info(f"[Reranker] Loaded {self.model_name}")
