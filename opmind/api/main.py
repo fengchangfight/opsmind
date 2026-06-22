@@ -11,7 +11,7 @@ from opmind.api.routes import query, retrieve, resume
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"[OpsMind] Starting up...")
-    print(f"[OpsMind] Vector store: {settings.chroma_persist_dir}")
+    print(f"[OpsMind] Vector store: Milvus {settings.milvus_host}:{settings.milvus_port}")
 
     embedder = Embedder()
     vector_store = VectorStore()
