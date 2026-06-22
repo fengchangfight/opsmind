@@ -1,4 +1,4 @@
-﻿# app RAG — 开发手册 (DEV MANUAL)
+﻿# OpsMind RAG — 开发手册 (DEV MANUAL)
 
 **版本**: v0.1  
 **日期**: 2026-06-20
@@ -121,9 +121,9 @@ opsmind-rag/
 │       └── types/index.ts           # TypeScript 类型
 ├── docker-compose.yml               # Milvus + 依赖容器
 ├── docs/                            # 设计文档
-│   ├── PRD_app_RAG.md
-│   ├── HLD_app_RAG.md
-│   └── LLD_app_RAG_0*.md
+│   ├── PRD_OpsMind_RAG.md
+│   ├── HLD_OpsMind_RAG.md
+│   └── LLD_OpsMind_RAG_0*.md
 ├── .env.example                     # 配置模板
 ├── start_demo.bat                   # Windows 一键启动脚本
 └── DEV_MANUAL.md                    # 本文件

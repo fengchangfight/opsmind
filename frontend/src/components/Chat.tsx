@@ -103,7 +103,7 @@ export default function Chat() {
         {/* Header */}
         <header className="bg-white border-b px-6 py-3 flex items-center justify-between shrink-0">
           <div>
-            <h1 className="text-lg font-bold text-gray-800">app RAG</h1>
+            <h1 className="text-lg font-bold text-gray-800">OpsMind RAG</h1>
             <p className="text-xs text-gray-500">Agentic RAG for Enterprise Operations</p>
           </div>
           <div className="flex items-center gap-2">
@@ -124,7 +124,7 @@ export default function Chat() {
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {messages.length === 0 && (
             <div className="text-center text-gray-400 mt-20">
-              <p className="text-2xl font-bold mb-2">app RAG</p>
+              <p className="text-2xl font-bold mb-2">OpsMind RAG</p>
               <p className="text-sm">输入运维问题，AI 将从知识库中检索并回答</p>
               <div className="mt-4 text-xs text-gray-300">
                 示例: "如何排查 MySQL 主从延迟?" · "SRE oncall 流程是什么?" · "如何配置告警规则?"

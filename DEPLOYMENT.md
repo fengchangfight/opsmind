@@ -1,4 +1,4 @@
-﻿# app RAG — 生产部署文档 (DEPLOYMENT)
+﻿# OpsMind RAG — 生产部署文档 (DEPLOYMENT)
 
 **版本**: v0.1  
 **日期**: 2026-06-20  
@@ -8,7 +8,7 @@
 
 ## 1. 概述
 
-本文档描述如何将 app RAG 从 Demo 环境（Milvus Standalone）升级为生产级部署。
+本文档描述如何将 OpsMind RAG 从 Demo 环境（Milvus Standalone）升级为生产级部署。
 
 ---
 
@@ -246,12 +246,12 @@ server {
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: app-api-hpa
-spec:
+  name: opsmind-api-hpa
+
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: app-api
+    name: opsmind-api
   minReplicas: 3
   maxReplicas: 10
   metrics:
@@ -266,7 +266,7 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: app-config
+  name: opsmind-config
 data:
   LLM_BASE_URL: "https://api.deepseek.com/v1"
   LLM_MODEL: "deepseek-v4-pro"
@@ -278,7 +278,7 @@ data:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: app-secrets
+  name: opsmind-secrets
 type: Opaque
 stringData:
   LLM_API_KEY: "<from-vault>"
@@ -325,10 +325,10 @@ stringData:
 
 | 指标 | 告警阈值 | 严重程度 |
 |------|---------|---------|
-| `app_retrieval_latency_seconds` (p95) | > 500ms | Warning |
-| `app_retrieval_latency_seconds` (p95) | > 2s | Critical |
-| `app_agent_iterations_total` (avg) | > 3 | Warning |
-| `app_tool_execution_total{status="failure"}` | > 5% of total | Critical |
+| `opsmind_retrieval_latency_seconds` (p95) | > 500ms | Warning |
+| `opsmind_retrieval_latency_seconds` (p95) | > 2s | Critical |
+| `opsmind_agent_iterations_total` (avg) | > 3 | Warning |
+| `opsmind_tool_execution_total{status="failure"}` | > 5% of total | Critical |
 | `http_server_duration_ms` (p99) | > 5s | Critical |
 | `milvus_num_entities` (delta) | < 0 for 10min | Warning (索引异常) |
 | `redis_connected_clients` | > 100 | Warning |
@@ -377,7 +377,7 @@ trace.set_tracer_provider(provider)
 docker compose restart milvus
 
 # 2. 恢复 PostgreSQL
-pg_restore -h $DB_HOST -U app -d app backup.dump
+pg_restore -h $DB_HOST -U opsmind -d opsmind backup.dump
 
 # 3. 恢复 Redis
 docker compose stop redis
@@ -441,7 +441,7 @@ df -h /data
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 # 重启 API pods
-kubectl rollout restart deployment/app-api
+kubectl rollout restart deployment/opsmind-api
 ```
 
 ### 9.3 索引重建

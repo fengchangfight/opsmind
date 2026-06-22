@@ -10,8 +10,8 @@ from app.api.routes import query, retrieve, resume
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"[app] Starting up...")
-    print(f"[app] Vector store: Milvus {settings.milvus_host}:{settings.milvus_port}")
+    print(f"[OpsMind] Starting up...")
+    print(f"[OpsMind] Vector store: Milvus {settings.milvus_host}:{settings.milvus_port}")
 
     embedder = Embedder()
     vector_store = VectorStore()
@@ -26,16 +26,16 @@ async def lifespan(app: FastAPI):
     }
 
     doc_count = vector_store.count()
-    print(f"[app] Vector store contains {doc_count} chunks")
-    print(f"[app] Ready on http://{settings.api_host}:{settings.api_port}")
+    print(f"[OpsMind] Vector store contains {doc_count} chunks")
+    print(f"[OpsMind] Ready on http://{settings.api_host}:{settings.api_port}")
 
     yield
 
-    print("[app] Shutting down...")
+    print("[OpsMind] Shutting down...")
 
 
 app = FastAPI(
-    title="app RAG",
+    title="OpsMind RAG",
     version="0.1.0",
     lifespan=lifespan,
     docs_url="/api/docs",

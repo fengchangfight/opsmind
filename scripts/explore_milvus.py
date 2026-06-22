@@ -8,7 +8,7 @@ from app.retrieval.embedder import Embedder
 
 def show_stats(vs: VectorStore):
     print(f"\n{'='*60}")
-    print(f"  Collection: app_chunks  |  Chunks: {vs.count()}")
+    print(f"  Collection: opsmind_chunks  |  Chunks: {vs.count()}")
     print(f"{'='*60}")
 
 def show_random(vs: VectorStore, n: int = 5):

@@ -5,7 +5,7 @@ from app.models import SearchResult, Citation
 from app.config import settings
 
 
-SYSTEM_PROMPT = """You are app, an expert SRE / DevOps assistant. Answer the user's question based on the provided context documents.
+SYSTEM_PROMPT = """You are OpsMind, an expert SRE / DevOps assistant. Answer the user's question based on the provided context documents.
 
 Rules:
 - Answer in Chinese if the user asks in Chinese, otherwise in English.

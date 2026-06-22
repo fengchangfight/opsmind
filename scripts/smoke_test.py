@@ -1,5 +1,5 @@
 ﻿"""
-Quick smoke test for app RAG backend.
+Quick smoke test for OpsMind RAG backend.
 Tests: config loading, vector store read, retrieve API
 """
 import asyncio
@@ -14,7 +14,7 @@ from app.agents.retrieve_agent import RetrieveAgent
 
 async def main():
     print("=" * 50)
-    print("app RAG - Smoke Test")
+    print("OpsMind RAG - Smoke Test")
     print("=" * 50)
 
     # 1. Config

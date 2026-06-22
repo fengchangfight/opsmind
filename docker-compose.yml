@@ -72,7 +72,7 @@ services:
     depends_on:
       - milvus
 
-  # === app API (commented by default, use start_demo.bat) ===
+  # === OpsMind API (commented by default, use start_demo.bat) ===
   # api:
   #   build:
   #     context: .

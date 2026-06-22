@@ -1,9 +1,9 @@
-﻿# app RAG
+﻿# OpsMind RAG
 
 > **Agentic RAG Platform for Enterprise Operations** — 混合检索 · 多 Agent 协作 · 流式推理 · 人机协作
 
 <p align="center">
-  <img src="docs/app.png" alt="app Demo" width="800">
+  <img src="docs/opsmind.png" alt="OpsMind Demo" width="800">
 </p>
 
 ---
@@ -157,13 +157,13 @@ opsmind-rag/
 
 | 文档 | 说明 |
 |------|------|
-| [PRD](docs/PRD_app_RAG.md) | 产品需求文档 |
-| [HLD](docs/HLD_app_RAG.md) | 总体架构设计 |
-| [LLD-01](docs/LLD_app_RAG_01_用户交互层.md) | 用户交互层详细设计 |
-| [LLD-02](docs/LLD_app_RAG_02_API网关层.md) | API 网关层详细设计 |
-| [LLD-03](docs/LLD_app_RAG_03_编排与运行时层.md) | 编排与运行时层详细设计 |
-| [LLD-04](docs/LLD_app_RAG_04_Agent层.md) | Agent 层详细设计 |
-| [LLD-05](docs/LLD_app_RAG_05_数据与基础设施层.md) | 数据与基础设施层详细设计 |
+| [PRD](docs/PRD_OpsMind_RAG.md) | 产品需求文档 |
+| [HLD](docs/HLD_OpsMind_RAG.md) | 总体架构设计 |
+| [LLD-01](docs/LLD_OpsMind_RAG_01_用户交互层.md) | 用户交互层详细设计 |
+| [LLD-02](docs/LLD_OpsMind_RAG_02_API网关层.md) | API 网关层详细设计 |
+| [LLD-03](docs/LLD_OpsMind_RAG_03_编排与运行时层.md) | 编排与运行时层详细设计 |
+| [LLD-04](docs/LLD_OpsMind_RAG_04_Agent层.md) | Agent 层详细设计 |
+| [LLD-05](docs/LLD_OpsMind_RAG_05_数据与基础设施层.md) | 数据与基础设施层详细设计 |
 | [DEV_MANUAL](DEV_MANUAL.md) | 开发手册 |
 | [DEPLOYMENT](DEPLOYMENT.md) | 生产部署文档 |
 
