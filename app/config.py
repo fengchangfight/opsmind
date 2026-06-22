@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     sqlite_path: str = "./data/opsmind.db"
     postgres_dsn: str = "postgresql://localhost:5432/opsmind"
 
+    # MCP Servers
+    mcp_servers: list[dict] = []
+
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8000

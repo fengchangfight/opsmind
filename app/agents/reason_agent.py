@@ -5,6 +5,7 @@ from openai import AsyncOpenAI
 from app.models import SearchResult, Citation
 from app.config import settings
 from app.context import ContextOrchestrator
+from app.mcp import McpManager
 
 
 SYSTEM_PROMPT = """You are OpsMind, an expert SRE / DevOps assistant. Answer the user's question based on the provided context documents.
@@ -19,13 +20,14 @@ Rules:
 
 
 class ReasonAgent:
-    def __init__(self, orchestrator: ContextOrchestrator | None = None):
+    def __init__(self, orchestrator: ContextOrchestrator | None = None, mcp_manager: McpManager | None = None):
         self.client = AsyncOpenAI(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
         )
         self.model = settings.llm_model
         self.orchestrator = orchestrator or ContextOrchestrator()
+        self.mcp_manager = mcp_manager
 
     async def reason_stream(
         self,
@@ -57,13 +59,23 @@ class ReasonAgent:
         # Append the actual user query as the final message
         messages.append({"role": "user", "content": query})
 
-        stream = await self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0.3,
-            max_tokens=2048,
-            stream=True,
-        )
+        # Build call params
+        call_kwargs: dict = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 2048,
+            "stream": True,
+        }
+
+        # Include MCP tools if manager is connected with tools
+        if self.mcp_manager:
+            mcp_tools = self.mcp_manager.get_all_tools()
+            if mcp_tools:
+                call_kwargs["tools"] = mcp_tools
+                call_kwargs["tool_choice"] = "auto"
+
+        stream = await self.client.chat.completions.create(**call_kwargs)
 
         async for chunk in stream:
             if chunk.choices[0].delta.content:

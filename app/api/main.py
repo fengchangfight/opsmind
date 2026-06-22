@@ -1,4 +1,5 @@
 ﻿from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,6 +9,18 @@ from app.retrieval import Embedder, VectorStore
 from app.agents import RetrieveAgent, ReasonAgent
 from app.api.routes import query, retrieve, resume, sessions, auth
 from app.api.auth import AuthMiddleware
+from app.mcp import McpManager
+
+
+def _load_demo_mcp_servers(manager: McpManager):
+    """Load demo MCP servers from config. No-op if none configured."""
+    for cfg_data in settings.mcp_servers:
+        try:
+            from app.mcp.config import McpServerConfig
+            cfg = McpServerConfig(**cfg_data)
+            manager.add_server(cfg)
+        except Exception as e:
+            print(f"[OpsMind] Failed to load MCP server config: {e}")
 
 
 @asynccontextmanager
@@ -22,14 +35,22 @@ async def lifespan(app: FastAPI):
     embedder = Embedder()
     vector_store = VectorStore()
     retrieve_agent = RetrieveAgent(embedder, vector_store)
-    reason_agent = ReasonAgent()
+
+    # MCP Manager
+    mcp_manager = McpManager()
+    _load_demo_mcp_servers(mcp_manager)
+    reason_agent = ReasonAgent(mcp_manager=mcp_manager)
 
     app.state.runtime = {
         "embedder": embedder,
         "vector_store": vector_store,
         "retrieve": retrieve_agent,
         "reason": reason_agent,
+        "mcp": mcp_manager,
     }
+
+    # Start MCP servers in background (non-blocking)
+    asyncio.create_task(mcp_manager.start_all())
 
     doc_count = vector_store.count()
     print(f"[OpsMind] Vector store contains {doc_count} chunks")
