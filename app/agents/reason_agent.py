@@ -88,6 +88,47 @@ class ReasonAgent:
 
         config = {"configurable": {"thread_id": session_id or "default"}}
 
+        # Detect if the last run was interrupted -> resume instead of fresh start
+        initial_state: dict | None = {
+            "query": query,
+            "context": doc_texts,
+            "citations": [c.model_dump() for c in citations],
+            "answer": "",
+            "confidence": 0.0,
+            "iteration": 0,
+            "max_iterations": 3,
+            "gaps": [],
+            "status": "running",
+        }
+
+        # Check if there's an interrupted checkpoint → inject context
+        try:
+            last_state = await self._reason_graph.aget_state(config)
+            if last_state and last_state.values:
+                prev_status = last_state.values.get("status", "")
+                prev_answer = last_state.values.get("answer", "")
+                prev_confidence = last_state.values.get("confidence", 0)
+                prev_gaps = last_state.values.get("gaps", [])
+                prev_iteration = last_state.values.get("iteration", 0)
+
+                if prev_status in ("interrupted",) or (prev_confidence < 0.7 and prev_gaps):
+                    # Inject previous context into fresh state
+                    initial_state["context"] = (
+                        initial_state["context"] +
+                        [f"[Previous iteration {prev_iteration}] Partial answer: {prev_answer}",
+                         f"Knowledge gaps: {', '.join(prev_gaps)}"]
+                    )
+                    initial_state["iteration"] = prev_iteration + 1
+                    if event_queue:
+                        event_queue.put_nowait(("reasoning_step", {
+                            "step": prev_iteration,
+                            "confidence": prev_confidence,
+                            "status": "resuming",
+                            "message": "从上一轮迭代恢复，注入知识缺口...",
+                        }))
+        except Exception:
+            pass  # No checkpoint yet, fresh start
+
         if event_queue:
             event_queue.put_nowait(("agent_start", {"agent_id": "reason_graph"}))
             event_queue.put_nowait(("reasoning_step", {
