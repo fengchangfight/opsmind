@@ -10,6 +10,7 @@ from app.agents import RetrieveAgent, ReasonAgent
 from app.api.routes import query, retrieve, resume, sessions, auth, mcp
 from app.api.auth import AuthMiddleware
 from app.mcp import McpManager
+from app.tools import create_default_registry
 
 
 def _load_demo_mcp_servers(manager: McpManager):
@@ -47,7 +48,8 @@ async def lifespan(app: FastAPI):
     # MCP Manager
     mcp_manager = McpManager()
     _load_demo_mcp_servers(mcp_manager)
-    reason_agent = ReasonAgent(mcp_manager=mcp_manager)
+    tool_registry = create_default_registry()
+    reason_agent = ReasonAgent(mcp_manager=mcp_manager, tool_registry=tool_registry)
 
     app.state.runtime = {
         "embedder": embedder,

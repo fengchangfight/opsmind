@@ -6,6 +6,7 @@ from app.models import SearchResult, Citation
 from app.config import settings
 from app.context import ContextOrchestrator
 from app.mcp import McpManager
+from app.tools import ToolRegistry
 
 
 SYSTEM_PROMPT = """You are OpsMind, an expert SRE / DevOps assistant. Answer the user's question based on the provided context documents.
@@ -22,7 +23,7 @@ Rules:
 class ReasonAgent:
     SYSTEM_PROMPT = SYSTEM_PROMPT
 
-    def __init__(self, orchestrator: ContextOrchestrator | None = None, mcp_manager: McpManager | None = None):
+    def __init__(self, orchestrator: ContextOrchestrator | None = None, mcp_manager: McpManager | None = None, tool_registry: ToolRegistry | None = None):
         self.client = AsyncOpenAI(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
@@ -30,6 +31,7 @@ class ReasonAgent:
         self.model = settings.llm_model
         self.orchestrator = orchestrator or ContextOrchestrator()
         self.mcp_manager = mcp_manager
+        self.tool_registry = tool_registry
 
     async def reason_stream(
         self,
@@ -65,8 +67,10 @@ class ReasonAgent:
         )
         messages.append({"role": "user", "content": query})
 
-        # MCP tools available?
+        # MCP + native tools
         mcp_tools = self.mcp_manager.get_all_tools() if self.mcp_manager else []
+        native_tools = self.tool_registry.get_all_openai_functions() if self.tool_registry else []
+        all_tools = mcp_tools + native_tools
 
         # Tool call loop (max 3 rounds)
         for _ in range(3):
@@ -76,8 +80,8 @@ class ReasonAgent:
                 "temperature": 0.3,
                 "max_tokens": 2048,
             }
-            if mcp_tools:
-                call_kwargs["tools"] = mcp_tools
+            if all_tools:
+                call_kwargs["tools"] = all_tools
                 call_kwargs["tool_choice"] = "auto"
 
             response = await self.client.chat.completions.create(**call_kwargs)
@@ -99,8 +103,14 @@ class ReasonAgent:
                             "arguments": arguments,
                         }))
 
-                    # Execute via MCP
-                    tool_result = await self.mcp_manager.call_tool(tool_name, arguments)
+                    # Execute: native first, then MCP
+                    tool_result: str
+                    if self.tool_registry and self.tool_registry.get(tool_name):
+                        tool_result = await self.tool_registry.execute(tool_name, arguments)
+                    elif self.mcp_manager:
+                        tool_result = await self.mcp_manager.call_tool(tool_name, arguments)
+                    else:
+                        tool_result = f"Error: Tool '{tool_name}' not found in any registry"
 
                     # Emit result
                     if event_queue:
