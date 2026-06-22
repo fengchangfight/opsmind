@@ -54,6 +54,16 @@ class SessionRepository(ABC):
         ...
 
     @abstractmethod
-    def delete_session(self, session_id: str):
-        """Delete session and its messages."""
+    def verify_user(self, username: str, password: str) -> Optional[dict]:
+        """Verify credentials, return user dict or None."""
+        ...
+
+    @abstractmethod
+    def get_user(self, user_id: str) -> Optional[dict]:
+        """Get user by id."""
+        ...
+
+    @abstractmethod
+    def delete_session(self, session_id: str, user_id: str = ""):
+        """Delete session (optionally scoped to user_id)."""
         ...

@@ -33,11 +33,19 @@ class SqliteSessionRepository(SessionRepository):
     def init(self):
         conn = self._get_conn()
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id       TEXT PRIMARY KEY,
+                username      TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                display_name  TEXT NOT NULL DEFAULT '',
+                role          TEXT NOT NULL DEFAULT 'user',
+                created_at    TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 title      TEXT DEFAULT '',
                 status     TEXT DEFAULT 'active',
-                user_id    TEXT DEFAULT 'default',
+                user_id    TEXT NOT NULL REFERENCES users(user_id),
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -50,7 +58,22 @@ class SqliteSessionRepository(SessionRepository):
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id, id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at);
         """)
+
+        # Seed demo users (idempotent)
+        import hashlib
+        demos = [
+            ("alice", "opsmind123", "Alice Wang", "sre"),
+            ("bob",   "opsmind123", "Bob Chen",   "devops"),
+        ]
+        for username, password, display, role in demos:
+            pw_hash = hashlib.sha256(password.encode()).hexdigest()
+            conn.execute(
+                "INSERT OR IGNORE INTO users (user_id, username, password_hash, display_name, role, created_at) VALUES (?,?,?,?,?,?)",
+                (username, username, pw_hash, display, role, _now()),
+            )
+
         conn.commit()
         conn.close()
 
@@ -135,9 +158,36 @@ class SqliteSessionRepository(SessionRepository):
         conn.commit()
         conn.close()
 
-    def delete_session(self, session_id: str):
+    def delete_session(self, session_id: str, user_id: str = ""):
         conn = self._get_conn()
-        conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-        conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        if user_id:
+            conn.execute(
+                "DELETE FROM messages WHERE session_id = ? AND session_id IN (SELECT session_id FROM sessions WHERE user_id = ?)",
+                (session_id, user_id),
+            )
+            conn.execute("DELETE FROM sessions WHERE session_id = ? AND user_id = ?", (session_id, user_id))
+        else:
+            conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         conn.commit()
         conn.close()
+
+    def verify_user(self, username: str, password: str) -> dict | None:
+        import hashlib
+        pw_hash = hashlib.sha256(password.encode()).hexdigest()
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT user_id, username, display_name, role FROM users WHERE username = ? AND password_hash = ?",
+            (username, pw_hash),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_user(self, user_id: str) -> dict | None:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT user_id, username, display_name, role FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None

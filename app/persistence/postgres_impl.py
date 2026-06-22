@@ -194,12 +194,40 @@ class PostgresSessionRepository(SessionRepository):
             title, session_id,
         )
 
-    def delete_session(self, session_id: str):
+    def delete_session(self, session_id: str, user_id: str = ""):
         import asyncio
         asyncio.get_event_loop().run_until_complete(
-            self._delete_session(session_id)
+            self._delete_session(session_id, user_id)
         )
 
-    async def _delete_session(self, session_id: str):
-        await self._execute("DELETE FROM messages WHERE session_id = $1", session_id)
-        await self._execute("DELETE FROM sessions WHERE session_id = $1", session_id)
+    async def _delete_session(self, session_id: str, user_id: str = ""):
+        if user_id:
+            await self._execute("DELETE FROM messages WHERE session_id = $1", session_id)
+            await self._execute("DELETE FROM sessions WHERE session_id = $1 AND user_id = $2", session_id, user_id)
+        else:
+            await self._execute("DELETE FROM messages WHERE session_id = $1", session_id)
+            await self._execute("DELETE FROM sessions WHERE session_id = $1", session_id)
+
+    def verify_user(self, username: str, password: str) -> dict | None:
+        import asyncio, hashlib
+        return asyncio.get_event_loop().run_until_complete(self._verify_user(username, password))
+
+    async def _verify_user(self, username: str, password: str) -> dict | None:
+        import hashlib
+        pw_hash = hashlib.sha256(password.encode()).hexdigest()
+        row = await self._fetchrow(
+            "SELECT user_id, username, display_name, role FROM users WHERE username = $1 AND password_hash = $2",
+            username, pw_hash,
+        )
+        return dict(row) if row else None
+
+    def get_user(self, user_id: str) -> dict | None:
+        import asyncio
+        return asyncio.get_event_loop().run_until_complete(self._get_user(user_id))
+
+    async def _get_user(self, user_id: str) -> dict | None:
+        row = await self._fetchrow(
+            "SELECT user_id, username, display_name, role FROM users WHERE user_id = $1",
+            user_id,
+        )
+        return dict(row) if row else None

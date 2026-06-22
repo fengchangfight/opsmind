@@ -6,7 +6,8 @@ from app.config import settings
 from app.persistence import get_repo
 from app.retrieval import Embedder, VectorStore
 from app.agents import RetrieveAgent, ReasonAgent
-from app.api.routes import query, retrieve, resume, sessions
+from app.api.routes import query, retrieve, resume, sessions, auth
+from app.api.auth import AuthMiddleware
 
 
 @asynccontextmanager
@@ -46,6 +47,7 @@ app = FastAPI(
     docs_url="/api/docs",
 )
 
+app.add_middleware(AuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
@@ -58,6 +60,7 @@ app.include_router(query.router, prefix="/api")
 app.include_router(retrieve.router, prefix="/api")
 app.include_router(resume.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
 
 
 @app.get("/health")

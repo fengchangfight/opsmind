@@ -24,8 +24,11 @@ async def query(
     reason_agent: ReasonAgent = runtime["reason"]
     repo = get_repo()
 
+    # Get authenticated user
+    user_id = getattr(http_request.state, "user_id", "default")
+
     # Ensure session exists
-    sid = session_id or repo.create_session()
+    sid = session_id or repo.create_session(user_id)
 
     # Save user message
     repo.save_message(sid, "user", q)

@@ -16,6 +16,10 @@ interface SessionMeta {
   updated_at: string;
 }
 
+interface Props {
+  onLogout: () => void;
+}
+
 const SESSION_KEY = 'opsmind_session_id';
 
 function loadStoredSid(): string | null {
@@ -26,7 +30,7 @@ function storeSid(sid: string) {
   try { localStorage.setItem(SESSION_KEY, sid); } catch {}
 }
 
-export default function Chat() {
+export default function Chat({ onLogout }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -181,6 +185,12 @@ export default function Chat() {
                 thinking...
               </span>
             )}
+            <button
+              onClick={onLogout}
+              className="px-2 py-0.5 text-xs text-gray-400 hover:text-gray-600 border rounded"
+            >
+              退出
+            </button>
           </div>
         </header>
 
