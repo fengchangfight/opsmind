@@ -19,7 +19,7 @@ async def main():
 
     # 1. Config
     print(f"\n1. Config: model={settings.llm_model}, embed={settings.embedding_model}")
-    print(f"   Chroma: {settings.chroma_persist_dir}")
+    print(f"   Milvus: {settings.milvus_host}:{settings.milvus_port}")
 
     # 2. Vector Store
     vs = VectorStore()

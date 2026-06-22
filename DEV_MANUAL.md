@@ -13,13 +13,14 @@
 |------|------|------|
 | Python | 3.10+ | 后端开发语言 |
 | Node.js | 18+ | 前端构建工具链 |
-| 磁盘 | 2GB+ | ChromaDB 向量数据 + 模型缓存 |
+| Docker | 24+ | Milvus standalone (etcd+minio+milvus) |
+| 磁盘 | 3GB+ | Milvus 向量数据 + Docker 镜像 + 模型缓存 |
 
 ### 1.2 安装依赖
 
 ```bash
 # 后端依赖 (在 opsmind-rag 根目录)
-pip install fastapi uvicorn chromadb pydantic-settings openai fastembed httpx
+pip install fastapi uvicorn pymilvus pydantic-settings openai fastembed httpx
 
 # 前端依赖
 cd frontend
@@ -42,10 +43,20 @@ cp .env.example .env
 # Ollama:    LLM_BASE_URL=http://localhost:11434/v1  LLM_MODEL=qwen2.5
 ```
 
-### 1.4 数据摄入
+### 1.4 启动 Milvus
 
 ```bash
-# 快速摄入（Demo 用，约 30-60 秒）
+# 启动 Milvus standalone（etcd + minio + milvus）
+docker compose up -d
+
+# 检查状态（约 30s 后可达 healthy）
+docker compose ps
+```
+
+### 1.5 数据摄入
+
+```bash
+# 快速摄入（Demo 用，约 60-120 秒）
 python scripts/ingest.py
 
 # 可选参数（在 .env 或环境变量中设置）:
@@ -55,7 +66,7 @@ python scripts/ingest.py
 
 数据路径: `sampledata/all_documents/` (EnterpriseRAG-Bench 数据集)
 
-### 1.5 启动服务
+### 1.6 启动服务
 
 ```bash
 # 后端
@@ -89,7 +100,7 @@ opsmind-rag/
 │   ├── retrieval/                   # 检索层
 │   │   ├── chunker.py               # 智能文档切分 (SimpleChunker)
 │   │   ├── embedder.py              # 向量生成 (FastEmbed, BGE-small)
-│   │   └── vector_store.py          # 向量存储 (ChromaDB)
+│   │   └── vector_store.py          # 向量存储 (Milvus via pymilvus)
 │   ├── agents/                      # Agent 层
 │   │   ├── retrieve_agent.py        # 检索 Agent
 │   │   └── reason_agent.py          # 推理 Agent (DeepSeek/OpenAI)
@@ -108,7 +119,7 @@ opsmind-rag/
 │       ├── components/Chat.tsx      # 主对话组件
 │       ├── api/client.ts            # API 客户端 + SSE
 │       └── types/index.ts           # TypeScript 类型
-├── data/chroma_db/                  # ChromaDB 持久化数据 (gitignore)
+├── docker-compose.yml               # Milvus + 依赖容器
 ├── docs/                            # 设计文档
 │   ├── PRD_OpsMind_RAG.md
 │   ├── HLD_OpsMind_RAG.md
@@ -178,7 +189,7 @@ event: error             → {"code": "INTERNAL", "message": "..."}
 
 ### 3.4 `GET /health`
 
-健康检查：`{"status": "ok", "docs_indexed": 32}`
+健康检查：`{"status": "ok", "docs_indexed": 254}`
 
 ---
 
@@ -235,7 +246,7 @@ set LLM_MODEL=qwen2.5
 
 ### 4.4 切换向量数据库
 
-当前 ChromaDB → 修改 `retrieval/vector_store.py` 的 `VectorStore` 类即可，接口签名不变。
+当前 Milvus standalone → 修改 `retrieval/vector_store.py` 的 `VectorStore` 类即可，接口签名不变。
 
 ### 4.5 本地开发流程
 
@@ -268,11 +279,11 @@ curl -X POST http://localhost:8000/api/retrieve -H "Content-Type: application/js
 
 ## 5. 常见问题
 
-### Q: 摄入时报 "DuplicateIDError"
-重新摄入前清空旧数据：删除 `data/chroma_db/` 目录，或脚本内已有 `vector_store.clear()`
+### Q: 摄入时报 "CollectionExists" / 数据冲突
+重新摄入前清空旧数据：`python -c "from opmind.retrieval.vector_store import VectorStore; VectorStore().clear()"`
 
-### Q: 首次运行慢
-FastEmbed 首次会从 HuggingFace 下载模型 (~130MB)，仅首次需要，后续缓存。
+### Q: Milvus 连接失败
+确认 `docker compose ps` 容器都在运行。若 etcd 报错，尝试 `docker compose down && docker compose up -d`。
 
 ### Q: SSE 连接断开
 前端 EventSource 支持自动重连。若持续断开，检查 CORS 配置和防火墙。
@@ -280,8 +291,8 @@ FastEmbed 首次会从 HuggingFace 下载模型 (~130MB)，仅首次需要，后
 ### Q: doc_title 为空
 需确保 chunker 中 `metadata` 包含 `doc_title` 字段。重新摄入即可。
 
-### Q: ChromaDB 数据膨胀
-每个 chunk 存储完整文本，1GB 文档约产生 2-3GB 向量数据。定期清理 `data/chroma_db/`。
+### Q: Milvus 数据膨胀
+检查 Docker volumes: `docker system df -v | findstr milvus`。定期 `docker compose down -v` 重建（需重新摄入）。
 
 ---
 
@@ -290,9 +301,9 @@ FastEmbed 首次会从 HuggingFace 下载模型 (~130MB)，仅首次需要，后
 | 指标 | 数值 | 说明 |
 |------|------|------|
 | 摄入速度 | ~2-5 docs/秒 | FastEmbed CPU |
-| 检索延迟 | ~16ms (32 docs) | ChromaDB + BGE-small |
+| 检索延迟 | ~16ms (254 docs) | Milvus + HNSW + BGE-small |
 | 端到端延迟 | ~3-8s | 含 LLM 推理 |
-| 内存占用 | ~500MB | Python + ChromaDB |
+| 内存占用 | ~2GB | Python + Milvus (etcd/minio/milvus 容器) |
 | 向量维度 | 384 (BGE-small) | 默认模型 |
 
 ---
@@ -301,4 +312,4 @@ FastEmbed 首次会从 HuggingFace 下载模型 (~130MB)，仅首次需要，后
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
-| v0.1 | 2026-06-20 | 初始 Demo 版本 |
+| v0.2 | 2026-06-21 | 切换到 Milvus standalone (HNSW 索引, RRFRanker) |

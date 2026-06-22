@@ -3,7 +3,8 @@ node_modules/
 __pycache__/
 *.pyc
 *.pyo
-data/chroma_db/
+data/
+volumes/
 frontend/dist/
 .env
 .env.test

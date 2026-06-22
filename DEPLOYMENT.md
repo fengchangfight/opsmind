@@ -2,13 +2,13 @@
 
 **版本**: v0.1  
 **日期**: 2026-06-20  
-**状态**: Demo → 生产改进指南
+**状态**: Milvus Standalone → Cluster 升级指南
 
 ---
 
 ## 1. 概述
 
-本文档描述如何将 OpsMind RAG Demo 升级为生产级部署，涵盖架构升级、基础设施选型、安全加固、监控告警和运维手册。
+本文档描述如何将 OpsMind RAG 从 Demo 环境（Milvus Standalone）升级为生产级部署。
 
 ---
 
@@ -18,11 +18,11 @@
 
 | 组件 | Demo 实现 | 生产推荐 | 原因 |
 |------|----------|---------|------|
-| **向量数据库** | ChromaDB (单机) | Milvus Cluster (Q/D/I 节点分离) | 支持水平扩展、混合检索、强一致性 |
+| **向量数据库** | Milvus Standalone (Docker) | Milvus Cluster (Q/D/I 节点分离) | 水平扩展、强一致性、读写分离 |
 | **消息/状态** | 无 (内存) | Redis Cluster + Streams | 持久化、多 Agent 通信、Consumer Group |
-| **元数据存储** | ChromaDB 内嵌 | PostgreSQL 14+ | 事务支持、SQL 审计查询 |
-| **对象存储** | 本地文件 | MinIO / S3 | 高可用、多副本、版本管理 |
-| **LLM 网关** | 直连 OpenAI | LiteLLM / 自建路由 | 多模型负载均衡、故障转移、成本控制 |
+| **元数据存储** | Milvus 内嵌 (etcd) | PostgreSQL 14+ | 事务支持、SQL 审计查询 |
+| **对象存储** | Milvus 内嵌 (MinIO) | 独立 MinIO Cluster / S3 | 高可用、多副本、版本管理 |
+| **LLM 网关** | 直连 DeepSeek API | LiteLLM / 自建路由 | 多模型负载均衡、故障转移、成本控制 |
 | **Embedding** | FastEmbed 本地 | BGE-M3 via ONNX 服务 / 专用 GPU 节点 | 更高精度(1024维)、批量推理加速 |
 | **缓存** | 无 | Redis (L1) + 本地 LRU (L2) | 热点查询缓存、LLM 响应缓存 |
 | **Web 服务器** | Uvicorn 直接 | Nginx → Gunicorn + Uvicorn Workers | 反向代理、SSL 终止、静态资源 |
@@ -75,26 +75,61 @@ services:
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com/v1}
       - LLM_MODEL=${LLM_MODEL:-deepseek-v4-pro}
       - REDIS_URL=redis://redis:6379
-      - CHROMA_HOST=chromadb
-      - CHROMA_PORT=8000
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
     depends_on:
       - redis
-      - chromadb
+      - milvus
     restart: unless-stopped
     volumes:
       - ./data:/app/data
 
-  # === ChromaDB ===
-  chromadb:
-    image: chromadb/chroma:latest
-    ports:
-      - "8001:8000"
-    volumes:
-      - chroma_data:/chroma/chroma
+  # === Milvus Standalone ===
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
     environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
-    restart: unless-stopped
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  milvus:
+    image: milvusdb/milvus:v2.4.13-hotfix
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"
 
   # === Redis ===
   redis:
@@ -118,7 +153,9 @@ services:
     restart: unless-stopped
 
 volumes:
-  chroma_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
   redis_data:
 ```
 
@@ -130,7 +167,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 RUN pip install --no-cache-dir \
-    fastapi uvicorn[standard] chromadb \
+    fastapi uvicorn[standard] pymilvus \
     pydantic-settings openai fastembed httpx
 
 COPY opmind/ ./opmind/
@@ -196,7 +233,7 @@ server {
 | Milvus Proxy | 2 | 1/2 core | 2/4 Gi | 查询路由 + 负载均衡 |
 | Milvus Query Node | 3+ | 4/8 core | 16/32 Gi | 向量检索主力 |
 | Milvus Data Node | 2 | 2/4 core | 8/16 Gi | 数据写入 + 索引构建 |
-| Milvus Index Node | 1 | 4/8 core | 16/32 Gi | 后台索引构建 (可单点) |
+| Milvus Index Node | 1 | 4/8 core | 16/32 Gi | 后台索引构建 |
 | PostgreSQL | 2 (主从) | 2/4 core | 4/8 Gi | 元数据 + 审计日志 |
 | Redis | 3 (Cluster) | 1/2 core | 2/4 Gi | 状态/消息/缓存 |
 | MinIO | 4 | 1/2 core | 2/4 Gi | 原始文档存储 |
@@ -293,7 +330,7 @@ stringData:
 | `opsmind_agent_iterations_total` (avg) | > 3 | Warning |
 | `opsmind_tool_execution_total{status="failure"}` | > 5% of total | Critical |
 | `http_server_duration_ms` (p99) | > 5s | Critical |
-| `chroma_collection_count` (delta) | < 0 for 10min | Warning (索引异常) |
+| `milvus_num_entities` (delta) | < 0 for 10min | Warning (索引异常) |
 | `redis_connected_clients` | > 100 | Warning |
 | LLM API `4xx/5xx` 错误率 | > 1% | Critical |
 
@@ -328,7 +365,7 @@ trace.set_tracer_provider(provider)
 
 | 数据 | 备份方式 | 频率 | 保留 |
 |------|---------|------|------|
-| ChromaDB 向量数据 | `docker exec chromadb tar czf backup.tar.gz /chroma` | 每日 | 30 天 |
+| Milvus 向量数据 | Milvus 备份工具 → MinIO/S3 | 每日 | 30 天 |
 | PostgreSQL | `pg_dump` → S3 | 每小时增量, 每日全量 | 90 天 |
 | Redis | AOF + RDB 快照 → S3 | AOF 实时, RDB 每小时 | 7 天 |
 | 原始文档 | S3 版本控制 | 实时 | 永久 |
@@ -336,10 +373,8 @@ trace.set_tracer_provider(provider)
 ### 7.2 恢复流程
 
 ```bash
-# 1. 恢复 ChromaDB
-docker compose stop chromadb
-docker compose run chromadb tar xzf backup.tar.gz -C /chroma
-docker compose start chromadb
+# 1. 恢复 Milvus
+docker compose restart milvus
 
 # 2. 恢复 PostgreSQL
 pg_restore -h $DB_HOST -U opsmind -d opsmind backup.dump
@@ -363,8 +398,8 @@ python scripts/smoke_test.py
 | 数据类型 | 每 1000 文档 | 每 10000 文档 | 每 100000 文档 |
 |----------|-------------|--------------|----------------|
 | 原始文档 | ~50 MB | ~500 MB | ~5 GB |
-| ChromaDB 向量 (384d) | ~100 MB | ~1 GB | ~10 GB |
-| ChromaDB 向量 (1024d) | ~250 MB | ~2.5 GB | ~25 GB |
+| Milvus 向量 (384d) | ~100 MB | ~1 GB | ~10 GB |
+| Milvus 向量 (1024d) | ~250 MB | ~2.5 GB | ~25 GB |
 | PostgreSQL 元数据 | ~5 MB | ~50 MB | ~500 MB |
 | 审计日志 (月) | ~10 MB | ~100 MB | ~1 GB |
 
@@ -387,8 +422,9 @@ python scripts/smoke_test.py
 # 健康检查
 curl http://localhost:8000/health
 
-# ChromaDB 状态
-curl http://localhost:8001/api/v1/heartbeat
+# Milvus 状态
+curl http://localhost:9091/healthz
+docker compose ps
 
 # Redis 状态
 redis-cli -h redis -p 6379 INFO stats

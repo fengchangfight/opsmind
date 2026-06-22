@@ -13,9 +13,11 @@ class Settings(BaseSettings):
     # Embedding (local via FastEmbed)
     embedding_model: str = "BAAI/bge-small-en-v1.5"
 
-    # ChromaDB
-    chroma_persist_dir: str = "./data/chroma_db"
-    chroma_collection_name: str = "opsmind_docs"
+    # Milvus
+    milvus_host: str = "localhost"
+    milvus_port: int = 19530
+    milvus_collection_name: str = "opsmind_chunks"
+    milvus_dim: int = 384  # must match embedding model dim
 
     # Data
     sample_data_dir: str = "./sampledata/all_documents"
