@@ -61,6 +61,17 @@ class ReasonAgent:
                 yield token
             return
 
+        # If tools are available (MCP/native), use tool-loop path which supports function calling.
+        # LangGraph path uses json_object output format which disables tool calls.
+        has_tools = bool(
+            (self.mcp_manager and self.mcp_manager.get_all_tools()) or
+            (self.tool_registry and self.tool_registry.get_all_openai_functions())
+        )
+        if has_tools:
+            async for token in self.reason_stream(query, results, citations, history, event_queue):
+                yield token
+            return
+
         if self._reason_graph is None:
             self._reason_graph = await build_reason_graph(
                 llm_client=self.client,
@@ -74,22 +85,9 @@ class ReasonAgent:
             for r, c in zip(results, citations)
         ]
 
-        initial_state: dict = {
-            "query": query,
-            "context": doc_texts,
-            "citations": [c.model_dump() for c in citations],
-            "answer": "",
-            "confidence": 0.0,
-            "iteration": 0,
-            "max_iterations": 3,
-            "gaps": [],
-            "status": "running",
-        }
-
         config = {"configurable": {"thread_id": session_id or "default"}}
 
-        # Detect if the last run was interrupted -> resume instead of fresh start
-        initial_state: dict | None = {
+        initial_state: dict = {
             "query": query,
             "context": doc_texts,
             "citations": [c.model_dump() for c in citations],
