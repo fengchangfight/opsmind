@@ -166,6 +166,35 @@ export default function Chat({ onLogout }: Props) {
 
   return (
     <div className="flex h-screen">
+      {/* Left Sidebar — Sessions */}
+      <aside className="w-64 bg-gray-50 border-r flex flex-col shrink-0">
+        <div className="px-4 py-3 border-b bg-white">
+          <h2 className="text-sm font-semibold text-gray-700">会话</h2>
+        </div>
+        <div className="px-3 py-2">
+          <button
+            onClick={newSession}
+            className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-blue-50 text-blue-600 font-medium"
+          >
+            + 新建会话
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto divide-y border-t">
+          {sessions.map((s) => (
+            <button
+              key={s.session_id}
+              onClick={() => loadSession(s.session_id)}
+              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 ${
+                s.session_id === sessionId ? 'bg-blue-50 border-l-2 border-blue-400' : ''
+              }`}
+            >
+              <div className="truncate text-gray-700">{s.title || '(新会话)'}</div>
+              <div className="text-gray-400 mt-0.5">{s.updated_at?.slice(0, 16) || ''}</div>
+            </button>
+          ))}
+        </div>
+      </aside>
+
       {/* Main Chat */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
@@ -174,7 +203,7 @@ export default function Chat({ onLogout }: Props) {
             <h1 className="text-lg font-bold text-gray-800">OpsMind RAG</h1>
             <p className="text-xs text-gray-500">Agentic RAG for Enterprise Operations</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             {Array.from(activeAgents).map((a) => (
               <span key={a} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
                 {a}
@@ -185,6 +214,9 @@ export default function Chat({ onLogout }: Props) {
                 thinking...
               </span>
             )}
+            <span className="text-xs text-gray-500">
+              {JSON.parse(localStorage.getItem('opsmind_user') || '{}').display_name || ''}
+            </span>
             <button
               onClick={onLogout}
               className="px-2 py-0.5 text-xs text-gray-400 hover:text-gray-600 border rounded"
@@ -259,36 +291,9 @@ export default function Chat({ onLogout }: Props) {
         </div>
       </div>
 
-      {/* Citation Panel */}
-      <aside className="w-80 bg-white border-l overflow-y-auto shrink-0">
+      {/* Citation Panel — Right */}
+      <aside className="w-72 bg-white border-l overflow-y-auto shrink-0">
         <div className="px-4 py-3 border-b">
-          <h2 className="text-sm font-semibold text-gray-700">会话</h2>
-        </div>
-        <div className="px-3 py-2">
-          <button
-            onClick={newSession}
-            className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-blue-50 text-blue-600 font-medium"
-          >
-            + 新建会话
-          </button>
-        </div>
-        <div className="divide-y border-t">
-          {sessions.map((s) => (
-            <button
-              key={s.session_id}
-              onClick={() => loadSession(s.session_id)}
-              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 ${
-                s.session_id === sessionId ? 'bg-blue-50' : ''
-              }`}
-            >
-              <div className="truncate text-gray-700">{s.title || '(新会话)'}</div>
-              <div className="text-gray-400 mt-0.5">{s.updated_at?.slice(0, 16) || ''}</div>
-            </button>
-          ))}
-        </div>
-
-        {/* Citations */}
-        <div className="px-4 py-3 border-t">
           <h2 className="text-sm font-semibold text-gray-700">引用来源</h2>
         </div>
         {citations.length === 0 ? (
