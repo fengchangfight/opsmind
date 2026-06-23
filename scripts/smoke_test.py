@@ -30,9 +30,7 @@ async def main():
 
     # 3. LlamaIndex Retriever
     print("\n3. LlamaIndex hybrid retriever test...")
-    from app.retrieval.embedder import Embedder
-    embedder = Embedder()
-    ra = RetrieveAgent(embedder, vs)
+    ra = RetrieveAgent(vs)
     ra.init_li_retriever()
     results, citations, latency = await ra.retrieve("retention policy", top_k=3)
     print(f"   Latency: {latency*1000:.0f}ms, Results: {len(results)}")

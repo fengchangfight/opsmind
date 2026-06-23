@@ -12,8 +12,7 @@ Question: {query}"""
 
 
 class RetrieveAgent:
-    def __init__(self, embedder, vector_store):
-        self.embedder = embedder
+    def __init__(self, vector_store):
         self.vector_store = vector_store
         self.reranker = Reranker()
         self._llm_client = None

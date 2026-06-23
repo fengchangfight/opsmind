@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.persistence import get_repo
-from app.retrieval import Embedder, VectorStore
+from app.retrieval import VectorStore
 from app.agents import RetrieveAgent, ReasonAgent
 from app.api.routes import query, retrieve, resume, sessions, auth, mcp
 from app.api.auth import AuthMiddleware
@@ -47,9 +47,8 @@ async def lifespan(app: FastAPI):
     repo.init()
     print(f"[OpsMind] DB backend: {settings.db_backend}")
 
-    embedder = Embedder()
     vector_store = VectorStore()
-    retrieve_agent = RetrieveAgent(embedder, vector_store)
+    retrieve_agent = RetrieveAgent(vector_store)
 
     # MCP Manager
     mcp_manager = McpManager()
@@ -60,7 +59,6 @@ async def lifespan(app: FastAPI):
     retrieve_agent.init_li_retriever()
 
     app.state.runtime = {
-        "embedder": embedder,
         "vector_store": vector_store,
         "retrieve": retrieve_agent,
         "reason": reason_agent,
