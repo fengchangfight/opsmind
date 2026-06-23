@@ -40,37 +40,34 @@ class ReasonAgent:
         results: list[SearchResult],
         citations: list[Citation],
         history: list[dict] | None = None,
-        event_queue=None,  # asyncio.Queue for SSE events
-        retriever=None,    # async callable (q, top_k) -> (results, citations)
+        event_queue=None,
+        retriever=None,
         session_id: str = "",
     ):
         """
-        Streaming reasoning via LangGraph with iterative deep-dive.
-        
-        Graph flow:
-        evaluate → assess_confidence → (finalize | generate_gaps → re_retrieve → loop | interrupt)
-        
-        Args:
-            retriever: async fn(query, top_k) -> (SearchResult[], Citation[])
+        Unified LangGraph path — tools + iterative reasoning in one graph.
+
+        evaluate (tool-loop inside) → assess_confidence
+            → finalize | generate_gaps → re_retrieve → loop | interrupt
         """
         from app.agents.reason_graph import build_reason_graph
 
         if retriever is None:
-            # Fallback to simple linear flow
-            async for token in self.reason_stream(query, results, citations, history, event_queue):
-                yield token
-            return
+            retriever = lambda q, k: (results, citations)
 
-        # If tools are available (MCP/native), use tool-loop path which supports function calling.
-        # LangGraph path uses json_object output format which disables tool calls.
-        has_tools = bool(
-            (self.mcp_manager and self.mcp_manager.get_all_tools()) or
-            (self.tool_registry and self.tool_registry.get_all_openai_functions())
-        )
-        if has_tools:
-            async for token in self.reason_stream(query, results, citations, history, event_queue):
-                yield token
-            return
+        # Collect tools
+        all_tools: list[dict] = []
+        if self.mcp_manager:
+            all_tools.extend(self.mcp_manager.get_all_tools())
+        if self.tool_registry:
+            all_tools.extend(self.tool_registry.get_all_openai_functions())
+
+        async def tool_executor(tool_name: str, args: dict) -> str:
+            if self.tool_registry and self.tool_registry.get(tool_name):
+                return await self.tool_registry.execute(tool_name, args)
+            if self.mcp_manager:
+                return await self.mcp_manager.call_tool(tool_name, args)
+            return f"Tool '{tool_name}' not found"
 
         if self._reason_graph is None:
             self._reason_graph = await build_reason_graph(
@@ -78,6 +75,8 @@ class ReasonAgent:
                 retriever=retriever,
                 model=self.model,
                 checkpoint_path=f"./data/langgraph_{session_id or 'default'}.db",
+                tools=all_tools if all_tools else None,
+                tool_executor=tool_executor if all_tools else None,
             )
 
         doc_texts = [
