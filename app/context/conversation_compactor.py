@@ -2,13 +2,13 @@
 Conversation compactor: head/tail/summary split with LLM-powered summarization.
 Inspired by: Hermes ContextCompressor, OpenCode SessionCompaction, Claude Code compact.
 """
+
 import json
-from datetime import datetime, timezone
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 from app.context.token_budget import TokenBudget
-
 
 SUMMARY_TEMPLATE = """You are summarizing an SRE/DevOps troubleshooting conversation.
 Create a structured summary of the conversation history below.
@@ -56,7 +56,8 @@ class ConversationCompactor:
         return True
 
     def _select_head_tail(
-        self, messages: list[dict],
+        self,
+        messages: list[dict],
     ) -> tuple[list[dict], list[dict]]:
         """
         Split messages into head (protected) and rest.
@@ -129,14 +130,16 @@ class ConversationCompactor:
 
         if len(middle) <= 2:
             return CompactionResult(
-                summary="", pre_tokens=0, post_tokens=0,
-                savings_pct=0, reason=reason,
+                summary="",
+                pre_tokens=0,
+                post_tokens=0,
+                savings_pct=0,
+                reason=reason,
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
 
         serialized = "\n\n".join(
-            f"[{m['role']}]: {str(m.get('content', ''))[:1500]}"
-            for m in middle
+            f"[{m['role']}]: {str(m.get('content', ''))[:1500]}" for m in middle
         )
 
         focus_line = f"Focus topic: {focus}" if focus else ""
@@ -154,7 +157,10 @@ class ConversationCompactor:
             response = await llm_client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "You are a context summarization assistant. Respond with the summary only, no preamble."},
+                    {
+                        "role": "system",
+                        "content": "You are a context summarization assistant. Respond with the summary only, no preamble.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 max_tokens=min(self.budget.summary_budget // 4, 2000),
@@ -162,15 +168,15 @@ class ConversationCompactor:
             )
             summary = response.choices[0].message.content or ""
         except Exception:
-            summary = f"[Auto-summary of {len(middle)} messages omitted due to API error]"
+            summary = (
+                f"[Auto-summary of {len(middle)} messages omitted due to API error]"
+            )
 
         pre_tokens = sum(
-            self.budget.estimate_tokens(str(m.get("content", "")))
-            for m in messages
+            self.budget.estimate_tokens(str(m.get("content", ""))) for m in messages
         )
         post_tokens = sum(
-            self.budget.estimate_tokens(str(m.get("content", "")))
-            for m in kept
+            self.budget.estimate_tokens(str(m.get("content", ""))) for m in kept
         ) + self.budget.estimate_tokens(summary)
         savings_pct = (pre_tokens - post_tokens) / max(pre_tokens, 1)
 
@@ -182,13 +188,18 @@ class ConversationCompactor:
         self._last_summary = summary
 
         return CompactionResult(
-            summary=summary, pre_tokens=pre_tokens, post_tokens=post_tokens,
-            savings_pct=round(savings_pct, 3), reason=reason,
+            summary=summary,
+            pre_tokens=pre_tokens,
+            post_tokens=post_tokens,
+            savings_pct=round(savings_pct, 3),
+            reason=reason,
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
     def build_compact_messages(
-        self, messages: list[dict], result: CompactionResult,
+        self,
+        messages: list[dict],
+        result: CompactionResult,
     ) -> list[dict]:
         """Assemble compacted message list: head + summary + tail."""
         kept, _ = self._select_head_tail(messages)
@@ -196,11 +207,13 @@ class ConversationCompactor:
         if not result.summary:
             return kept
 
-        # Insert summary as system message after head
+        # Insert summary as system message after the first system message,
+        # then continue appending the rest (head + tail)
         compacted = []
+        summary_inserted = False
         for m in kept:
             compacted.append(m)
-            if m["role"] == "system" and result.summary:
+            if not summary_inserted and m["role"] == "system":
                 compacted.append({
                     "role": "system",
                     "content": (
@@ -211,16 +224,16 @@ class ConversationCompactor:
                         "The following messages are the recent context.]"
                     ),
                 })
-                break
-        else:
-            if result.summary:
-                compacted.insert(0, {
-                    "role": "system",
-                    "content": (
-                        "<conversation-summary>\n"
-                        f"{result.summary}\n"
-                        "</conversation-summary>"
-                    ),
-                })
+                summary_inserted = True
+
+        if not summary_inserted:
+            compacted.insert(0, {
+                "role": "system",
+                "content": (
+                    "<conversation-summary>\n"
+                    f"{result.summary}\n"
+                    "</conversation-summary>"
+                ),
+            })
 
         return compacted

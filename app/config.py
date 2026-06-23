@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     demo_categories_raw: str = "confluence,github"
 
     # Demo: max docs per category
-    demo_max_docs_per_category: int = 5
+    demo_max_docs_per_category: int = 10
 
     # Retrieval
     top_k: int = 5

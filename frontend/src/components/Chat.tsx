@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Message, Citation } from '../types';
-import { connectSSE, disconnectSSE, fetchSessions, fetchSession, getMcpStatus } from '../api/client';
+import { connectSSE, disconnectSSE, fetchSessions, fetchSession, getMcpStatus, deleteSession } from '../api/client';
 
 let msgIdCounter = 0;
 function nextId(): string {
@@ -72,6 +72,17 @@ export default function Chat({ onLogout }: Props) {
     setSessionId(sid);
     storeSid(sid);
     setLoaded(true);
+  }
+
+  async function handleDelete(sid: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    await deleteSession(sid);
+    if (sessionId === sid) {
+      setMessages([]);
+      setSessionId('');
+      localStorage.removeItem(SESSION_KEY);
+    }
+    fetchSessions().then(setSessions);
   }
 
   async function newSession() {
@@ -222,12 +233,21 @@ export default function Chat({ onLogout }: Props) {
             <button
               key={s.session_id}
               onClick={() => loadSession(s.session_id)}
-              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 ${
+              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 flex items-center justify-between ${
                 s.session_id === sessionId ? 'bg-blue-50 border-l-2 border-blue-400' : ''
               }`}
             >
-              <div className="truncate text-gray-700">{s.title || '(新会话)'}</div>
-              <div className="text-gray-400 mt-0.5">{s.updated_at?.slice(0, 16) || ''}</div>
+              <div className="flex-1 min-w-0">
+                <div className="truncate text-gray-700">{s.title || '(新会话)'}</div>
+                <div className="text-gray-400 mt-0.5">{s.updated_at?.slice(0, 16) || ''}</div>
+              </div>
+              <button
+                onClick={(e) => handleDelete(s.session_id, e)}
+                className="ml-1 px-1 text-gray-300 hover:text-red-500 shrink-0"
+                title="删除会话"
+              >
+                ✕
+              </button>
             </button>
           ))}
         </div>
