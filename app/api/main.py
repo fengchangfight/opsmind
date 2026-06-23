@@ -57,6 +57,7 @@ async def lifespan(app: FastAPI):
     tool_registry = create_default_registry()
     reason_agent = ReasonAgent(mcp_manager=mcp_manager, tool_registry=tool_registry)
     retrieve_agent.set_llm_client(reason_agent.client)
+    retrieve_agent.init_li_retriever()
 
     app.state.runtime = {
         "embedder": embedder,
