@@ -11,8 +11,10 @@ os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 from app.config import settings
 from app.connectors import TxtConnector
-from app.retrieval import SimpleChunker, Embedder, VectorStore
+from app.retrieval import Embedder, VectorStore
 from app.models import Chunk
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.schema import Document
 
 CACHE_FILE = Path("data/ingest_cache.json")
 
@@ -42,7 +44,7 @@ async def main():
     print(f"[Ingest] Dense: {settings.embedding_dense_model}, Sparse: {settings.embedding_sparse_model}")
 
     connector = TxtConnector()
-    chunker = SimpleChunker(chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
+    splitter = SentenceSplitter(chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
     embedder = Embedder()
     vector_store = VectorStore()
 
@@ -51,12 +53,12 @@ async def main():
 
     cats_to_scan = set(settings.demo_categories) if settings.demo_categories else {"confluence", "github"}
     cat_counts: dict[str, int] = {}
-    batch_size = 10
-    chunk_buf: list[Chunk] = []
-    text_buf: list[str] = []
-    total_new, total_skip, total_delete = 0, 0, 0
+    li_docs: list[Document] = []
+    new_doc_ids: list[str] = []
+    total_skip = 0
     new_cache: dict[str, str] = {}
 
+    # Phase 1: collect documents + filter
     for cat_name in cats_to_scan:
         cat_dir = data_path / cat_name
         if not cat_dir.exists():
@@ -66,49 +68,68 @@ async def main():
                 break
             cat_counts[cat_name] = cat_counts.get(cat_name, 0) + 1
 
-            # Q2: dedup — skip if content unchanged
             doc_hash = _hash_content(doc.content)
             new_cache[doc.doc_id] = doc_hash
             if cache.get(doc.doc_id) == doc_hash:
                 total_skip += 1
                 continue
 
-            total_new += 1
-            for c in chunker.chunk(doc):
-                chunk_buf.append(c)
-                text_buf.append(f"{doc.title}\n{c.content}")
-                if len(text_buf) >= batch_size:
-                    await _embed_batch(text_buf, chunk_buf, embedder, vector_store)
-                    chunk_buf.clear()
-                    text_buf.clear()
+            li_docs.append(Document(
+                text=doc.content,
+                doc_id=doc.doc_id,
+                metadata={"doc_title": doc.title, "category": cat_name, "doc_id": doc.doc_id},
+            ))
+            new_doc_ids.append(doc.doc_id)
 
-            if (total_new + total_skip) % 10 == 0:
-                print(f"[Ingest] {total_new} new, {total_skip} skipped, cats: {dict(cat_counts)}")
+    print(f"[Ingest] Phase 1: {len(li_docs)} new docs, {total_skip} skipped")
 
-    # Q1: delete chunks for docs no longer in source
+    # Phase 2: chunk with LlamaIndex SentenceSplitter
+    print(f"[Ingest] Phase 2: chunking {len(li_docs)} docs...")
+    nodes = splitter(li_docs) if li_docs else []
+    print(f"[Ingest] {len(li_docs)} docs → {len(nodes)} nodes")
+
+    # Phase 3: embed + insert
+    if nodes:
+        print(f"[Ingest] Phase 3: embedding {len(nodes)} nodes...")
+        batch_size = 32
+        for start in range(0, len(nodes), batch_size):
+            batch_nodes = nodes[start:start + batch_size]
+            chunk_batch = [
+                Chunk(
+                    chunk_id=n.node_id,
+                    doc_id=n.metadata.get("doc_id", ""),
+                    content=n.text,
+                    metadata={
+                        "doc_id": n.metadata.get("doc_id", ""),
+                        "doc_title": n.metadata.get("doc_title", ""),
+                        "title": n.metadata.get("doc_title", ""),
+                        "category": n.metadata.get("category", ""),
+                    },
+                )
+                for n in batch_nodes
+            ]
+            texts = [f"{c.metadata.get('doc_title','')}\n{c.content}" for c in chunk_batch]
+            dense = await embedder.embed(texts)
+            sparse = await embedder.embed_sparse(texts)
+            for c, d, s in zip(chunk_batch, dense, sparse):
+                c.embedding = d
+                c.sparse_embedding = s
+            vector_store.add_chunks(chunk_batch)
+            if (start + batch_size) % 128 == 0:
+                print(f"[Ingest] Embedded {min(start + batch_size, len(nodes))}/{len(nodes)}")
+
+    # Phase 4: cleanup deleted docs
     removed_ids = set(cache.keys()) - set(new_cache.keys())
     for doc_id in removed_ids:
         vector_store.delete_by_doc_id(doc_id)
-        total_delete += 1
+    total_delete = len(removed_ids)
     if total_delete:
         print(f"[Ingest] Removed {total_delete} stale documents")
 
-    # Final batch
-    if chunk_buf:
-        await _embed_batch(text_buf, chunk_buf, embedder, vector_store)
-
     _save_cache(new_cache)
 
-    print(f"\n[Ingest] Done! {total_new} new, {total_skip} skipped, {total_delete} deleted, Milvus: {vector_store.count()}")
-
-
-async def _embed_batch(texts: list[str], chunks: list[Chunk], embedder: Embedder, vector_store: VectorStore):
-    dense = await embedder.embed(texts)
-    sparse = await embedder.embed_sparse(texts)
-    for c, d, s in zip(chunks, dense, sparse):
-        c.embedding = d
-        c.sparse_embedding = s
-    vector_store.add_chunks(chunks)
+    print(f"\n[Ingest] Done! {len(new_doc_ids)} new, {total_skip} skipped, {total_delete} deleted")
+    print(f"[Ingest] {len(nodes)} chunks in Milvus: {vector_store.count()}")
 
 
 if __name__ == "__main__":
