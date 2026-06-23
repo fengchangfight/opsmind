@@ -1,7 +1,7 @@
 ﻿# OpsMind RAG — 开发手册 (DEV MANUAL)
 
-**版本**: v0.1  
-**日期**: 2026-06-20
+**版本**: v0.3
+**日期**: 2026-06-23
 
 ---
 
@@ -19,49 +19,42 @@
 ### 1.2 安装依赖
 
 ```bash
-# 后端依赖 (在 opsmind-rag 根目录)
-pip install fastapi uvicorn pymilvus pydantic-settings openai fastembed httpx
+# 后端依赖
+pip install fastapi uvicorn pymilvus pydantic-settings openai fastembed httpx \
+    "llama-index>=0.11" sentence-transformers "mcp>=1.24" aiosqlite langgraph
 
 # 前端依赖
-cd frontend
-npm install
+cd frontend && npm install
 ```
 
 ### 1.3 配置 API Key
 
 ```bash
-# 方式一：环境变量（推荐，不落盘）
-set LLM_API_KEY=sk-your-deepseek-key
-
-# 方式二：.env 文件
-cp .env.example .env
-# 编辑 .env，填写 LLM_API_KEY
+# 环境变量方式（推荐）
+set LLM_API_KEY=sk-your-deepseek-api-key
 
 # 切换 LLM 提供商
-# OpenAI:    LLM_BASE_URL=https://api.openai.com/v1  LLM_MODEL=gpt-4o-mini
-# DeepSeek:  LLM_BASE_URL=https://api.deepseek.com/v1  LLM_MODEL=deepseek-v4-pro
-# Ollama:    LLM_BASE_URL=http://localhost:11434/v1  LLM_MODEL=qwen2.5
+# DeepSeek: LLM_BASE_URL=https://api.deepseek.com/v1  LLM_MODEL=deepseek-v4-pro
+# OpenAI:  LLM_BASE_URL=https://api.openai.com/v1     LLM_MODEL=gpt-4o-mini
+# Ollama:  LLM_BASE_URL=http://localhost:11434/v1     LLM_MODEL=qwen2.5
 ```
 
 ### 1.4 启动 Milvus
 
 ```bash
-# 启动 Milvus standalone（etcd + minio + milvus）
 docker compose up -d
-
-# 检查状态（约 30s 后可达 healthy）
-docker compose ps
+docker compose ps  # 确认 etcd, minio, milvus, attu 均 healthy
 ```
 
 ### 1.5 数据摄入
 
 ```bash
-# 快速摄入（Demo 用，约 60-120 秒）
+# 增量索引 — content hash cache 跳过未修改文档
 python scripts/ingest.py
 
-# 可选参数（在 .env 或环境变量中设置）:
-# DEMO_CATEGORIES_RAW=confluence,github   # 要索引的类别
-# DEMO_MAX_DOCS_PER_CATEGORY=50          # 每类最多文档数
+# 可选参数（.env 中设置）:
+# DEMO_CATEGORIES_RAW=confluence,github
+# DEMO_MAX_DOCS_PER_CATEGORY=50
 ```
 
 数据路径: `sampledata/all_documents/` (EnterpriseRAG-Bench 数据集)
@@ -69,10 +62,10 @@ python scripts/ingest.py
 ### 1.6 启动服务
 
 ```bash
-# 后端
+# 后端 (只 watch 源码目录，避免 DB 变化触发重载)
 uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
 
-# 前端 (另开终端)
+# 前端
 cd frontend && npm run dev
 
 # 或一键启动 (Windows)
@@ -80,9 +73,9 @@ start_demo.bat
 ```
 
 访问地址:
-- 前端: `http://localhost:5173`
-- API 文档 (Swagger): `http://localhost:8000/api/docs`
-- 健康检查: `http://localhost:8000/health`
+- 前端: `http://localhost:5173` (Demo 用户 `alice` / `bob`，密码 `opsmind123`)
+- API 文档: `http://localhost:8000/api/docs`
+- Attu GUI: `http://localhost:8001`
 
 ---
 
@@ -90,210 +83,193 @@ start_demo.bat
 
 ```
 opsmind-rag/
-├── app/                          # 后端主包
-│   ├── config.py                    # 配置 (Pydantic Settings)
-│   ├── models/                      # 数据模型
-│   │   └── document.py              # Document, Chunk, Citation, SearchResult
-│   ├── connectors/                  # 数据接入层
-│   │   ├── base.py                  # BaseConnector 抽象接口
-│   │   └── txt_connector.py         # .txt 文件解析器
-│   ├── retrieval/                   # 检索层
-│   │   ├── chunker.py               # 智能文档切分 (SimpleChunker)
-│   │   ├── embedder.py              # 向量生成 (FastEmbed, BGE-small)
-│   │   └── vector_store.py          # 向量存储 (Milvus via pymilvus)
-│   ├── agents/                      # Agent 层
-│   │   ├── retrieve_agent.py        # 检索 Agent
-│   │   └── reason_agent.py          # 推理 Agent (DeepSeek/OpenAI)
-│   └── api/                         # FastAPI 接口
-│       ├── main.py                  # App 入口 + 生命周期
-│       ├── schemas.py               # 请求/响应 Schema
-│       └── routes/
-│           ├── query.py             # GET /api/query (SSE 流式)
-│           ├── retrieve.py          # POST /api/retrieve (纯检索)
-│           └── resume.py            # POST /api/resume (中断恢复)
+├── app/                              # 后端主包
+│   ├── config.py                     # 配置 (Pydantic Settings)
+│   ├── models/
+│   │   └── document.py               # Document, Chunk, Citation, SearchResult
+│   ├── connectors/                   # 数据接入层
+│   │   ├── base.py                   # BaseConnector 抽象接口
+│   │   └── txt_connector.py          # .txt 文件解析器
+│   ├── retrieval/                    # 检索层 (LlamaIndex 驱动)
+│   │   ├── chunker.py                # SimpleChunker
+│   │   ├── embedder.py               # FastEmbedEmbedding (LlamaIndex) + BM25 sparse
+│   │   ├── vector_store.py           # MilvusVectorStore (LlamaIndex) + hybrid search
+│   │   └── reranker.py               # SentenceTransformerRerank (LlamaIndex)
+│   ├── agents/                       # Agent 层
+│   │   ├── retrieve_agent.py         # Query Expansion + Hybrid Search + Reranker
+│   │   ├── reason_agent.py           # LangGraph 迭代推理 + MCP/native tool loop
+│   │   └── reason_graph.py           # LangGraph StateGraph (evaluate → confidence → loop)
+│   ├── api/                          # FastAPI
+│   │   ├── main.py                   # 入口 + 生命周期 (MCP 启动, 模型缓存)
+│   │   ├── auth.py                   # JWT 认证中间件
+│   │   ├── schemas.py                # 请求/响应 Schema
+│   │   └── routes/                   # query, retrieve, resume, sessions, auth, mcp
+│   ├── persistence/                  # Repository 模式 (SQLite + PostgreSQL)
+│   ├── context/                      # 上下文管理
+│   │   ├── token_budget.py           # Token 预算分配器
+│   │   ├── conversation_compactor.py # Head/Tail/Summary 压缩 (参考 Claude Code/Hermes/OpenCode)
+│   │   ├── compaction_trigger.py     # 多路径触发 (preflight/overflow/manual)
+│   │   └── context_orchestrator.py   # 上下文编排器
+│   ├── tools/                        # 原生工具系统
+│   │   ├── base.py                   # BaseTool + PermissionChecker + CircuitBreaker
+│   │   ├── registry.py               # ToolRegistry (注册/发现/执行)
+│   │   ├── datetime_tool.py          # get_current_time
+│   │   ├── calculator_tool.py        # 算术
+│   │   └── random_tool.py            # 随机数
+│   └── mcp/                          # MCP 框架
+│       ├── config.py                 # McpServerConfig (stdio/http/sse)
+│       ├── server_task.py            # McpServerTask (连接/发现/重试)
+│       ├── tool_adapter.py           # MCP → OpenAI function calling
+│       └── manager.py                # McpManager (生命周期/工具调用)
 ├── scripts/
-│   ├── ingest.py                    # 文档摄入脚本
-│   └── smoke_test.py                # 冒烟测试
-├── frontend/                        # React 前端
-│   └── src/
-│       ├── components/Chat.tsx      # 主对话组件
-│       ├── api/client.ts            # API 客户端 + SSE
-│       └── types/index.ts           # TypeScript 类型
-├── docker-compose.yml               # Milvus + 依赖容器
-├── docs/                            # 设计文档
-│   ├── PRD_OpsMind_RAG.md
-│   ├── HLD_OpsMind_RAG.md
-│   └── LLD_OpsMind_RAG_0*.md
-├── .env.example                     # 配置模板
-├── start_demo.bat                   # Windows 一键启动脚本
-└── DEV_MANUAL.md                    # 本文件
+│   ├── ingest.py                     # LlamaIndex IngestionPipeline (增量索引)
+│   ├── smoke_test.py                 # 冒烟测试
+│   └── demo_mcp_server.py            # Demo MCP Server (echo + sysinfo)
+├── frontend/                         # React + Vite + Tailwind
+├── data/                             # SQLite DB + LangGraph checkpoint + ingest cache
+├── docs/                             # PRD, HLD, 5×LLD
+├── docker-compose.yml                # Milvus Standalone + Attu
+├── start_demo.bat
+├── DEV_MANUAL.md
+└── DEPLOYMENT.md
 ```
 
 ---
 
 ## 3. API 接口说明
 
-### 3.1 `GET /api/query` (SSE)
+### 3.1 `POST /api/login`
+
+登录获取 JWT token。
+
+```json
+POST /api/login  {"username": "alice", "password": "opsmind123"}
+→ {"token": "...", "user": {"user_id": "alice", "display_name": "Alice Wang", "role": "sre"}}
+```
+
+### 3.2 `GET /api/query` (SSE)
 
 流式问答接口，返回 Server-Sent Events。
 
-**请求**: `GET /api/query?query=<str>&top_k=<int>&category=<str>&history=<base64>`
+**参数**: `?query=<str>&top_k=<int>&session_id=<str>`
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| query | string | 必填 | 用户查询 |
-| top_k | int | 5 | 返回文档数 |
-| category | string | 可选 | 过滤文档类别 (confluence, github) |
-| history | string | 可选 | Base64 编码的历史消息 JSON (`[{"role":"user","content":"..."},...]`)，用于多轮对话上下文 |
+| 事件 | 说明 |
+|------|------|
+| `agent_start` | Agent 开始执行 |
+| `retrieval_result` | 检索完成 |
+| `reasoning_step` | LangGraph 迭代进度 (step, confidence) |
+| `tool_call` | MCP/native 工具调用开始 |
+| `tool_result` | 工具执行结果 |
+| `chunk` | 流式 token |
+| `final_answer` | 最终答案 + citations |
+| `interrupted` | 置信度不足，需人工介入 |
 
-**SSE 事件流**:
-
-```
-event: agent_start       → {"agent_id": "retrieve"}
-event: retrieval_result  → {"num_results": 3, "latency_ms": 280}
-event: agent_start       → {"agent_id": "reason"}
-event: chunk             → {"content": "根据..."}
-event: chunk             → {"content": "..."}
-event: final_answer      → {"answer": "...", "citations": [...], "model": "deepseek-v4-pro"}
-event: error             → {"code": "INTERNAL", "message": "..."}
-```
-
-### 3.2 `POST /api/retrieve`
+### 3.3 `POST /api/retrieve`
 
 纯检索接口（不调用 LLM）。
 
-**请求体**:
 ```json
-{"query": "MySQL replication lag", "top_k": 5, "filters": {"category": "confluence"}}
+POST /api/retrieve  {"query": "...", "top_k": 5}
+→ {"results": [...], "citations": [...], "latency_ms": 280}
 ```
 
-**响应**:
-```json
-{
-  "query": "MySQL replication lag",
-  "results": [
-    {"chunk_id": "...", "content": "...", "doc_title": "...", "score": 0.92}
-  ],
-  "citations": [...],
-  "latency_ms": 280
-}
-```
+### 3.4 `GET /api/sessions`
 
-### 3.3 `POST /api/resume`
+会话列表（需认证）。`DELETE /api/sessions/{id}` 删除。
 
-中断恢复接口（Demo 为简化实现，重新推理）。
+### 3.5 `GET /api/mcp/status`
 
-**请求体**:
-```json
-{"session_id": "sess-xxx", "human_input": "请更关注网络因素", "option": "continue"}
-```
+MCP server 连接状态。
 
-### 3.4 `GET /health`
+### 3.6 `GET /health`
 
-健康检查：`{"status": "ok", "docs_indexed": 254}`
+健康检查：`{"status": "ok", "docs_indexed": 260}`
 
 ---
 
 ## 4. 开发指南
 
-### 4.1 添加新数据源
-
-实现 `BaseConnector` 接口：
+### 4.1 添加新 Native Tool
 
 ```python
-from app.connectors.base import BaseConnector
-from app.models import Document
+# 1. 创建 app/tools/my_tool.py
+from app.tools.base import BaseTool
 
-class MyConnector(BaseConnector):
-    connector_name = "my_source"
-    supported_types = ["json"]
+class MyTool(BaseTool):
+    name = "my_tool"
+    description = "Does something useful"
+    parameters = {"type": "object", "properties": {...}}
 
-    async def extract(self, source: str) -> AsyncIterator[Document]:
-        # 从数据源读取文档
-        yield Document(
-            doc_id="...",
-            source=f"my_source://...",
-            source_type="json",
-            title="...",
-            content="...",
-            metadata={"category": "custom"},
-        )
+    async def execute(self, arguments: dict) -> str:
+        return "result"
+
+# 2. 在 app/tools/registry.py 的 create_default_registry() 中注册
+registry.register(MyTool())
 ```
 
-### 4.2 切换 Embedding 模型
+### 4.2 添加新 MCP Server
 
 ```python
-# config.py 或环境变量
-EMBEDDING_MODEL=BAAI/bge-small-en-v1.5  # FastEmbed 本地模型
-EMBEDDING_MODEL=text-embedding-3-small  # OpenAI API (需改 embedder.py)
+# 在 main.py 的 _load_demo_mcp_servers() 中添加:
+manager.add_server(McpServerConfig(
+    name="my-server",
+    transport=StdioConfig(command="python", args=["my_mcp_server.py"]),
+))
 ```
 
-### 4.3 切换 LLM
+### 4.3 切换 Embedding 模型
 
-环境变量即可：
 ```bash
-# DeepSeek
-set LLM_BASE_URL=https://api.deepseek.com/v1
-set LLM_MODEL=deepseek-v4-pro
+# .env 或环境变量
+EMBEDDING_DENSE_MODEL=BAAI/bge-small-en-v1.5   # 384d, 轻量
+EMBEDDING_SPARSE_MODEL=Qdrant/bm25              # BM25 稀疏
+```
 
-# OpenAI
+### 4.4 切换 LLM
+
+```bash
 set LLM_BASE_URL=https://api.openai.com/v1
 set LLM_MODEL=gpt-4o-mini
-
-# Ollama 本地
-set LLM_BASE_URL=http://localhost:11434/v1
-set LLM_MODEL=qwen2.5
 ```
-
-### 4.4 切换向量数据库
-
-当前 Milvus standalone → 修改 `retrieval/vector_store.py` 的 `VectorStore` 类即可，接口签名不变。
 
 ### 4.5 本地开发流程
 
 ```bash
-# 1. 修改代码后跑冒烟测试
+# 1. 冒烟测试
 python scripts/smoke_test.py
 
-# 2. 若改了 embedding/chunking，需要重新摄入
+# 2. 增量摄入 (快)
 python scripts/ingest.py
 
-# 3. 启动后端开发模式
-uvicorn app.api.main:app --reload
+# 3. 启动后端
+uvicorn app.api.main:app --reload --reload-dir app
 
-# 4. 前端热更新开发
+# 4. 前端热更新
 cd frontend && npm run dev
 
-# 5. 用 curl 测试
+# 5. 测试 API
 curl "http://localhost:8000/api/query?query=test&top_k=3"
-curl -X POST http://localhost:8000/api/retrieve -H "Content-Type: application/json" -d '{"query":"test","top_k":3}'
+curl -X POST http://localhost:8000/api/retrieve -H "Content-Type: application/json" -d '{"query":"test"}'
 ```
-
-### 4.6 代码规范
-
-- Python: 类型注解必须，使用 `async/await`
-- TypeScript: `strict: true`, `noUncheckedIndexedAccess`
-- 文档字符串: Google/Numpy 风格
-- 提交信息: `<type>: <description>` (feat, fix, docs, refactor)
 
 ---
 
 ## 5. 常见问题
 
-### Q: 摄入时报 "CollectionExists" / 数据冲突
-重新摄入前清空旧数据：`python -c "from app.retrieval.vector_store import VectorStore; VectorStore().clear()"`
+### Q: MCP server 未连接
+检查启动日志是否有 `[MCP] demo: connected, 2 tools`。若没有，检查 `scripts/demo_mcp_server.py` 是否存在。
 
-### Q: Milvus 连接失败
-确认 `docker compose ps` 容器都在运行。若 etcd 报错，尝试 `docker compose down && docker compose up -d`。
+### Q: Reranker 报 connection timeout
+模型已缓存在 `~/.cache/huggingface/hub/`，启动时设 `HF_HUB_OFFLINE=1` 禁止联网。
 
-### Q: SSE 连接断开
-前端 EventSource 支持自动重连。若持续断开，检查 CORS 配置和防火墙。
+### Q: uvicorn 频繁重启 (watchfiles)
+数据库写入触发了 reload。使用 `--reload-dir app` 只 watch 源码。
 
-### Q: doc_title 为空
-需确保 chunker 中 `metadata` 包含 `doc_title` 字段。重新摄入即可。
+### Q: 摄入反复处理同一文档
+增量缓存 `data/ingest_cache_li/` 会跳过未修改文档。清除缓存后全量重建：`rm -rf data/ingest_cache_li/`。
 
-### Q: Milvus 数据膨胀
-检查 Docker volumes: `docker system df -v | findstr milvus`。定期 `docker compose down -v` 重建（需重新摄入）。
+### Q: 前端 MCP 工具不触发
+LangGraph 路径使用 `json_object` 格式禁用 function calling。检测到 tools 时自动走 tool-loop 路径。
 
 ---
 
@@ -301,11 +277,12 @@ curl -X POST http://localhost:8000/api/retrieve -H "Content-Type: application/js
 
 | 指标 | 数值 | 说明 |
 |------|------|------|
-| 摄入速度 | ~2-5 docs/秒 | FastEmbed CPU |
-| 检索延迟 | ~16ms (254 docs) | Milvus + HNSW + BGE-small |
+| 摄入速度 | ~2-5 docs/秒 | FastEmbed CPU + BM25 sparse |
+| 检索延迟 | ~16ms (260 docs) | Milvus HNSW + BGE-small |
+| Hybrid 检索 | ~30ms | Dense + Sparse + RRF |
 | 端到端延迟 | ~3-8s | 含 LLM 推理 |
-| 内存占用 | ~2GB | Python + Milvus (etcd/minio/milvus 容器) |
-| 向量维度 | 384 (BGE-small) | 默认模型 |
+| 内存占用 | ~2GB | Python + Milvus (etcd/minio/milvus) |
+| 向量维度 | 384d dense + BM25 sparse | BGE-small + Qdrant/bm25 |
 
 ---
 
@@ -313,4 +290,6 @@ curl -X POST http://localhost:8000/api/retrieve -H "Content-Type: application/js
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
-| v0.2 | 2026-06-21 | 切换到 Milvus standalone (HNSW 索引, RRFRanker) |
+| v0.3 | 2026-06-23 | LlamaIndex 全栈集成 (SentenceSplitter, MilvusVectorStore, SentenceTransformerRerank, IngestionPipeline); 混合检索 dense+sparse; LangGraph 迭代推理; MCP 工具框架; SQLite 持久化 + 压缩; 用户登录; 增量索引 |
+| v0.2 | 2026-06-21 | Milvus standalone, 上下文管理, session 持久化 |
+| v0.1 | 2026-06-20 | 初始 Demo: FastAPI + ChromaDB + React |
