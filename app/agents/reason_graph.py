@@ -126,7 +126,7 @@ async def build_reason_graph(
     async def re_retrieve_node(state: ReasonState) -> dict:
         gaps = state.get("gaps", []) or [state.get("query", "")]
         q = f"{state.get('query','')} {' '.join(gaps)}"
-        results, citations = await retriever(q, 3)
+        results, citations, _ = await retriever(q, 3)
         new_ctx = state.get("context", []) + [
             f"[{c.citation_id if hasattr(c,'citation_id') else '?'}] {r.doc_title if hasattr(r,'doc_title') else str(r)}"
             for r, c in zip(results, citations if citations else [])
