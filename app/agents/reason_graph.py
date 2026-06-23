@@ -110,17 +110,17 @@ async def build_reason_graph(
         except json.JSONDecodeError:
             data = {}
         return {
-            "confidence": float(data.get("confidence", 0.5)),
-            "gaps": data.get("gaps", []),
-            "iteration": state.get("iteration", 0),
-            "max_iterations": state.get("max_iterations", 3),
+                "confidence": float(data.get("confidence", 0.5)),
+                "gaps": data.get("gaps", []),
+                "iteration": state.get("iteration", 0),
+                "max_iterations": state.get("max_iterations", 1),
         }
 
     # ── Route ──────────────────────────────────────────────────
     def route_confidence(state: ReasonState) -> str:
         c = state.get("confidence", 0.0)
         i = state.get("iteration", 0)
-        mx = state.get("max_iterations", 3)
+        mx = state.get("max_iterations", 1)
         if c >= 0.7: return "finalize"
         if i < mx: return "generate_gaps"
         return "interrupt"

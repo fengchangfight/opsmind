@@ -92,7 +92,7 @@ class ReasonAgent:
             "answer": "",
             "confidence": 0.0,
             "iteration": 0,
-            "max_iterations": 3,
+            "max_iterations": settings.max_iterations,
             "gaps": [],
             "status": "running",
         }
