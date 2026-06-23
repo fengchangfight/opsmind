@@ -157,7 +157,11 @@ export default function Chat({ onLogout }: Props) {
           break;
 
         case 'reasoning_step':
-          streamContent += `\n🔄 **迭代 ${data.step + 1}/${data.max_iterations}** — 置信度: ${(data.confidence * 100).toFixed(0)}%\n`;
+          const ci = data.confidence;
+          const confStr = typeof ci === 'number' && !isNaN(ci) ? `${(ci * 100).toFixed(0)}%` : '';
+          const iter = (data.iteration || data.step || 0) + 1;
+          const maxIter = data.max_iterations || 3;
+          streamContent += `\n🔄 **迭代 ${iter}/${maxIter}**${confStr ? ` — 置信度: ${confStr}` : ''}\n`;
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiMsg.id ? { ...m, content: streamContent, isStreaming: true } : m

@@ -52,11 +52,11 @@ async def build_reason_graph(
     # ── Node: evaluate (normal LLM, tools allowed) ──────────────
     async def evaluate_node(state: ReasonState) -> dict:
         it = state.get("iteration", 0)
+        mx = state.get("max_iterations", 3)
         if event_queue:
             event_queue.put_nowait(("reasoning_step", {
-                "step": it, "confidence": 0.0,
-                "iteration": it, "max_iterations": state.get("max_iterations", 3),
-                "message": f"迭代 {it+1}/{state.get('max_iterations',3)} — 分析中...",
+                "step": it, "iteration": it + 1, "max_iterations": mx,
+                "message": f"迭代 {it + 1}/{mx} — 分析中...",
             }))
         messages = [
             {"role": "system", "content": (
@@ -95,12 +95,6 @@ async def build_reason_graph(
         query = state.get("query", "")
         if not answer.strip():
             return {"confidence": 0.0, "gaps": [], "iteration": state.get("iteration", 0), "max_iterations": state.get("max_iterations", 3)}
-
-        if event_queue:
-            event_queue.put_nowait(("reasoning_step", {
-                "step": state.get("iteration", 0),
-                "message": "信心评估中...",
-            }))
 
         prompt = (
             f'Question: {query}\nAnswer: {answer[:2000]}\n\n'
