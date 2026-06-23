@@ -3,6 +3,7 @@ import type { Citation } from '../types';
 type EventHandler = (event: string, data: any) => void;
 
 let eventSource: EventSource | null = null;
+let serverErrorReceived = false;  // tracks if server already sent an error event
 
 function getToken(): string | null {
   return localStorage.getItem('opsmind_token');
@@ -27,7 +28,7 @@ export function connectSSE(url: string, handler: EventHandler): void {
   const sep = url.includes('?') ? '&' : '?';
   eventSource = new EventSource(token ? `${url}${sep}_token=${encodeURIComponent(token)}` : url);
 
-  const events = ['agent_start', 'retrieval_result', 'chunk', 'final_answer', 'error', 'tool_call', 'tool_result', 'reasoning_step', 'interrupted'] as const;
+  const events = ['agent_start', 'retrieval_result', 'chunk', 'final_answer', 'tool_call', 'tool_result', 'reasoning_step', 'interrupted'] as const;
 
   events.forEach((eventName) => {
     eventSource!.addEventListener(eventName, (e: MessageEvent) => {
@@ -40,7 +41,22 @@ export function connectSSE(url: string, handler: EventHandler): void {
     });
   });
 
+  // Dedicated error listener: track server-sent errors, prevent onerror overwrite
+  serverErrorReceived = false;
+  eventSource.addEventListener('error', (e: MessageEvent) => {
+    serverErrorReceived = true;
+    try {
+      const data = JSON.parse(e.data);
+      handler('error', data);
+    } catch {
+      handler('error', {});
+    }
+  });
+
   eventSource.onerror = async () => {
+    // If server already sent an error event, don't overwrite with generic "连接中断"
+    if (serverErrorReceived) return;
+
     // Check if it's an auth failure by trying a quick API call
     try {
       const res = await fetch('/api/sessions', { headers: authHeaders() });

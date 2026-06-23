@@ -159,9 +159,14 @@ export default function Chat({ onLogout }: Props) {
         case 'reasoning_step':
           const ci = data.confidence;
           const confStr = typeof ci === 'number' && !isNaN(ci) ? `${(ci * 100).toFixed(0)}%` : '';
-          const iter = (data.iteration || data.step || 0) + 1;
-          const maxIter = data.max_iterations || 3;
-          streamContent += `\n🔄 **迭代 ${iter}/${maxIter}**${confStr ? ` — 置信度: ${confStr}` : ''}\n`;
+          const rawIter = data.iteration ?? data.step ?? 0;
+          const rawMax = data.max_iterations ?? 0;
+          const iter = rawIter + 1;
+          const maxIter = rawMax + 1;
+          const msg = data.message ? ` — ${data.message}` : '';
+          // Replace previous reasoning line (single-line overwrite)
+          streamContent = streamContent.split('\n').filter(l => !l.includes('🔄 **迭代')).join('\n');
+          streamContent += `\n🔄 **迭代 ${iter}/${maxIter}**${confStr ? ` — 置信度: ${confStr}` : ''}${msg}\n`;
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiMsg.id ? { ...m, content: streamContent, isStreaming: true } : m

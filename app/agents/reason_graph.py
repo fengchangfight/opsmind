@@ -10,7 +10,6 @@ import json
 from typing import TypedDict
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import interrupt
 
 
 class ReasonState(TypedDict, total=False):
@@ -23,7 +22,6 @@ class ReasonState(TypedDict, total=False):
     max_iterations: int
     gaps: list[str]
     status: str
-    human_feedback: str
 
 
 def _build_evaluate_prompt(state: ReasonState) -> str:
@@ -55,8 +53,8 @@ async def build_reason_graph(
         mx = state.get("max_iterations", 1)
         if event_queue:
             event_queue.put_nowait(("reasoning_step", {
-                "step": it, "iteration": it, "max_iterations": mx,
-                "message": f"迭代 {it + 1}/{mx} — 分析中...",
+                "iteration": it, "max_iterations": mx,
+                "message": "分析中...",
             }))
         messages = [
             {"role": "system", "content": (
@@ -67,7 +65,7 @@ async def build_reason_graph(
         ]
 
         # Tool call loop inside evaluate
-        for _ in range(3):
+        for tool_round in range(3):
             kwargs = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 2048}
             if tools:
                 kwargs["tools"] = tools
@@ -78,7 +76,20 @@ async def build_reason_graph(
             if choice.message.tool_calls and tool_executor:
                 for tc in choice.message.tool_calls:
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                    result = await tool_executor(tc.function.name, args)
+                    if event_queue:
+                        event_queue.put_nowait(("tool_call_start", {
+                            "tool_name": tc.function.name,
+                            "arguments": args,
+                        }))
+                    try:
+                        result = await tool_executor(tc.function.name, args)
+                    except Exception as tool_err:
+                        result = f"Tool error: {tool_err}"
+                    if event_queue:
+                        event_queue.put_nowait(("tool_result", {
+                            "tool_name": tc.function.name,
+                            "result": str(result)[:500],
+                        }))
                     messages.append(choice.message.model_dump())
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             else:
@@ -95,6 +106,13 @@ async def build_reason_graph(
         query = state.get("query", "")
         if not answer.strip():
             return {"confidence": 0.0, "gaps": [], "iteration": state.get("iteration", 0), "max_iterations": state.get("max_iterations", 3)}
+
+        if event_queue:
+            event_queue.put_nowait(("reasoning_step", {
+                "iteration": state.get("iteration", 0),
+                "max_iterations": state.get("max_iterations", 1),
+                "message": "评估置信度...",
+            }))
 
         prompt = (
             f'Question: {query}\nAnswer: {answer[:2000]}\n\n'
@@ -120,10 +138,10 @@ async def build_reason_graph(
     def route_confidence(state: ReasonState) -> str:
         c = state.get("confidence", 0.0)
         i = state.get("iteration", 0)
-        mx = state.get("max_iterations", 1)
-        if c >= 0.7: return "finalize"
-        if i < mx: return "generate_gaps"
-        return "interrupt"
+        mx = state.get("max_iterations", 0)
+        if c >= 0.7 or i >= mx:
+            return "finalize"
+        return "generate_gaps"
 
     # ── Nodes: gaps / re_retrieve / finalize / interrupt ────────
     async def generate_gaps_node(state: ReasonState) -> dict:
@@ -132,6 +150,12 @@ async def build_reason_graph(
     async def re_retrieve_node(state: ReasonState) -> dict:
         gaps = state.get("gaps", []) or [state.get("query", "")]
         q = f"{state.get('query','')} {' '.join(gaps)}"
+        if event_queue:
+            event_queue.put_nowait(("reasoning_step", {
+                "iteration": state.get("iteration", 0),
+                "max_iterations": state.get("max_iterations", 1),
+                "message": f"重新检索: {', '.join(gaps[:3])}",
+            }))
         results, citations, _ = await retriever(q, 3)
         new_ctx = state.get("context", []) + [
             f"[{c.citation_id if hasattr(c,'citation_id') else '?'}] {r.doc_title if hasattr(r,'doc_title') else str(r)}"
@@ -142,14 +166,6 @@ async def build_reason_graph(
     async def finalize_node(state: ReasonState) -> dict:
         return {"status": "finalized"}
 
-    async def interrupt_node(state: ReasonState) -> dict:
-        user_input = interrupt({
-            "reason": f"Confidence too low ({state.get('confidence',0):.2f})",
-            "confidence": state.get("confidence", 0),
-            "gaps": state.get("gaps", []),
-        })
-        return {"human_feedback": str(user_input) if user_input else "", "iteration": state.get("iteration", 0) + 1}
-
     # ── Build ─────────────────────────────────────────────────
     g = StateGraph(ReasonState)
     g.add_node("evaluate", evaluate_node)
@@ -157,16 +173,14 @@ async def build_reason_graph(
     g.add_node("generate_gaps", generate_gaps_node)
     g.add_node("re_retrieve", re_retrieve_node)
     g.add_node("finalize", finalize_node)
-    g.add_node("interrupt", interrupt_node)
 
     g.set_entry_point("evaluate")
     g.add_edge("evaluate", "assess_confidence")
     g.add_conditional_edges("assess_confidence", route_confidence, {
-        "finalize": "finalize", "generate_gaps": "generate_gaps", "interrupt": "interrupt",
+        "finalize": "finalize", "generate_gaps": "generate_gaps",
     })
     g.add_edge("generate_gaps", "re_retrieve")
     g.add_edge("re_retrieve", "evaluate")
-    g.add_edge("interrupt", "evaluate")
     g.add_edge("finalize", END)
 
     return g.compile(checkpointer=checkpointer)

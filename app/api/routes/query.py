@@ -48,14 +48,20 @@ async def query(
 
     # Start reasoning in background
     async def run_reason():
-        full_answer = ""
-        async for token in reason_agent.reason_graph_stream(
-            q, results, citations, messages_history, tool_event_queue,
-            retriever=lambda q, k: retrieve_agent.retrieve(q, k),
-            session_id=sid,
-        ):
-            full_answer += token
-        tool_event_queue.put_nowait(("done", {"answer": full_answer}))
+        try:
+            full_answer = ""
+            async for token in reason_agent.reason_graph_stream(
+                q, results, citations, messages_history, tool_event_queue,
+                retriever=lambda q, k: retrieve_agent.retrieve(q, k),
+                session_id=sid,
+            ):
+                full_answer += token
+            tool_event_queue.put_nowait(("done", {"answer": full_answer}))
+        except Exception as e:
+            tool_event_queue.put_nowait(("error", {
+                "code": "LLM_FAILED",
+                "message": f"推理引擎异常: {str(e)[:200]}",
+            }))
 
     reason_task = asyncio.create_task(run_reason())
 
@@ -72,8 +78,8 @@ async def query(
                     event_type, data = await asyncio.wait_for(tool_event_queue.get(), timeout=3)
                 except asyncio.TimeoutError:
                     heartbeat_count += 1
-                    if heartbeat_count > 40:  # ~120s total
-                        yield f"event: error\ndata: {json.dumps({'code': 'TIMEOUT', 'message': '请求超时'})}\n\n"
+                    if heartbeat_count > 100:  # 300s total (matches nginx proxy_read_timeout)
+                        yield f"event: error\ndata: {json.dumps({'code': 'TIMEOUT', 'message': '请求超时，推理引擎未能在300秒内完成'})}\n\n"
                         break
                     yield ": heartbeat\n\n"
                     continue

@@ -45,7 +45,8 @@ class Settings(BaseSettings):
 
     # Retrieval
     top_k: int = 5
-    max_iterations: int = 1
+    max_iterations: int = 0
+    llm_timeout: float = 120.0    # seconds per LLM API call
 
     @property
     def demo_categories(self) -> list[str]:

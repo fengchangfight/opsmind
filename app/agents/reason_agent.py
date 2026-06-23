@@ -25,6 +25,7 @@ class ReasonAgent:
         self.client = AsyncOpenAI(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
+            timeout=settings.llm_timeout,
         )
         self.model = settings.llm_model
         self.orchestrator = orchestrator or ContextOrchestrator()
@@ -148,7 +149,7 @@ class ReasonAgent:
 
         if event_queue:
             event_queue.put_nowait(("reasoning_step", {
-                "step": final_state.get("iteration", 0),
+                "iteration": final_state.get("iteration", 0),
                 "confidence": confidence,
                 "status": status,
             }))
