@@ -22,7 +22,7 @@ class RetrieveAgent:
         self._llm_client = client
 
     def init_li_retriever(self):
-        """Build LlamaIndex hybrid retriever at startup."""
+        """Build LlamaIndex hybrid retriever + pre-warm reranker at startup."""
         from llama_index.core import VectorStoreIndex, Settings
         from llama_index.embeddings.fastembed import FastEmbedEmbedding
 
@@ -34,6 +34,9 @@ class RetrieveAgent:
             vector_store_query_mode="hybrid",
             similarity_top_k=settings.top_k * 3,
         )
+        # Pre-warm reranker in background (non-blocking)
+        import threading
+        threading.Thread(target=self.reranker._load, daemon=True).start()
         return self
 
     async def retrieve(

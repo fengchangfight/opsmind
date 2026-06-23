@@ -1,9 +1,7 @@
 """Cross-Encoder Reranker backed by LlamaIndex SentenceTransformerRerank postprocessor."""
-import os
 import logging
 
 logger = logging.getLogger(__name__)
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 
 class Reranker:
