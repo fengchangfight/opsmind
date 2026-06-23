@@ -1,50 +1,41 @@
-﻿"""RetrieveAgent — LlamaIndex VectorStoreIndex retriever + Query Expansion + Reranker."""
-import time, json
+﻿"""RetrieveAgent — LlamaIndex hybrid retriever (dense + sparse via RRF) + Reranker + Query Expansion."""
+import json, time
 from typing import Optional
 from app.models import SearchResult, Citation
-from app.retrieval.embedder import Embedder
-from app.retrieval.vector_store import VectorStore
 from app.retrieval.reranker import Reranker
 from app.config import settings
 
 
-QUERY_EXPANSION_PROMPT = """Expand the following search query into 3-5 alternative versions 
-to improve retrieval recall. Vary keywords and phrasing while preserving intent.
+QUERY_EXPANSION_PROMPT = """Generate 3-5 search query variants for the question below. 
 Return JSON: {"variants": ["variant1", "variant2", ...]}
-
-Original query: {query}"""
+Question: {query}"""
 
 
 class RetrieveAgent:
-    def __init__(self, embedder: Embedder, vector_store: VectorStore):
+    def __init__(self, embedder, vector_store):
         self.embedder = embedder
         self.vector_store = vector_store
         self.reranker = Reranker()
         self._llm_client = None
-        self._li_retriever = None  # Pre-built by init_li_retriever()
+        self._li_retriever = None
 
     def set_llm_client(self, client):
         self._llm_client = client
 
     def init_li_retriever(self):
-        """Build LlamaIndex retriever at startup (before event loop)."""
-        from llama_index.core import VectorStoreIndex
+        """Build LlamaIndex hybrid retriever at startup."""
+        from llama_index.core import VectorStoreIndex, Settings
         from llama_index.embeddings.fastembed import FastEmbedEmbedding
 
-        li_store = self.vector_store.get_li_store()
-        embed = FastEmbedEmbedding(model_name=settings.embedding_dense_model)
-        index = VectorStoreIndex.from_vector_store(li_store, embed_model=embed)
-        self._li_retriever = index.as_retriever(similarity_top_k=settings.top_k * 3)
-        return self
+        Settings.embed_model = FastEmbedEmbedding(model_name=settings.embedding_dense_model)
 
-    def _get_li_retriever(self):
-        """Lazy-init LlamaIndex retriever with hybrid search."""
-        if self._li_retriever is None:
-            li_store = self.vector_store.get_li_store()
-            embed_model = FastEmbedEmbedding(model_name=settings.embedding_dense_model)
-            index = VectorStoreIndex.from_vector_store(li_store, embed_model=embed_model)
-            self._li_retriever = index.as_retriever(similarity_top_k=settings.top_k * 3)
-        return self._li_retriever
+        li_store = self.vector_store.get_li_store()
+        index = VectorStoreIndex.from_vector_store(li_store)
+        self._li_retriever = index.as_retriever(
+            vector_store_query_mode="hybrid",
+            similarity_top_k=settings.top_k * 3,
+        )
+        return self
 
     async def retrieve(
         self, query: str, top_k: int | None = None, filters: dict | None = None,
@@ -52,8 +43,8 @@ class RetrieveAgent:
         t0 = time.monotonic()
         top_k = top_k or settings.top_k
 
-        # Query Expansion (async LLM call)
-        expanded_queries = [query]
+        # Query Expansion (LLM generates 3-5 variants)
+        expanded = [query]
         if self._llm_client:
             try:
                 resp = await self._llm_client.chat.completions.create(
@@ -62,36 +53,25 @@ class RetrieveAgent:
                     response_format={"type": "json_object"}, temperature=0.3, max_tokens=256,
                 )
                 data = json.loads(resp.choices[0].message.content or "{}")
-                expanded_queries.extend(data.get("variants", [])[:4])
+                expanded.extend(data.get("variants", [])[:4])
             except Exception:
                 pass
 
-        # LlamaIndex dense + Sparse hybrid search
-        all_results: list[SearchResult] = []
+        # LlamaIndex hybrid retriever (dense + sparse via Milvus RRF)
+        all_results = []
         seen = set()
-
-        for q in expanded_queries:
-            # LlamaIndex dense search via pre-built retriever
-            if self._li_retriever:
-                nodes = self._li_retriever.retrieve(q)
-                for node in nodes:
-                    nid = node.node.node_id
-                    if nid not in seen:
-                        seen.add(nid)
-                        all_results.append(SearchResult(
-                            chunk_id=nid, doc_id=node.node.metadata.get("doc_id", ""),
-                            content=node.node.text, doc_title=node.node.metadata.get("doc_title", ""),
-                            score=node.score or 0.0,
-                            metadata={"category": node.node.metadata.get("category", "")},
-                        ))
-            # Sparse hybrid search for keyword recall
-            dense = await self.embedder.embed_single(q)
-            sparse = await self.embedder.embed_sparse_single(q)
-            results = self.vector_store.hybrid_search(dense, sparse, top_k=top_k * 3, filters=filters)
-            for r in results:
-                if r.chunk_id not in seen:
-                    seen.add(r.chunk_id)
-                    all_results.append(r)
+        for q in expanded:
+            nodes = self._li_retriever.retrieve(q)
+            for node in nodes:
+                nid = node.node.node_id
+                if nid not in seen:
+                    seen.add(nid)
+                    all_results.append(SearchResult(
+                        chunk_id=nid, doc_id=node.node.metadata.get("doc_id", ""),
+                        content=node.node.text, doc_title=node.node.metadata.get("doc_title", ""),
+                        score=node.score or 0.0,
+                        metadata={"category": node.node.metadata.get("category", "")},
+                    ))
 
         # Cross-Encoder Reranker
         if len(all_results) > top_k:

@@ -92,12 +92,36 @@ class VectorStore:
 
     # ── LlamaIndex integration point ───────────────────────
     def get_li_store(self):
-        """Return a LlamaIndex MilvusVectorStore backed by this collection (for VectorStoreIndex, retriever, etc.)."""
+        """Return a LlamaIndex MilvusVectorStore with native sparse support (no FlagEmbedding)."""
         from llama_index.vector_stores.milvus import MilvusVectorStore
+        from llama_index.vector_stores.milvus.utils import BaseSparseEmbeddingFunction
+
+        class BM25SparseFunc(BaseSparseEmbeddingFunction):
+            def __init__(self):
+                from fastembed import SparseTextEmbedding
+                from app.config import settings
+                self._model = SparseTextEmbedding(model_name=settings.embedding_sparse_model)
+
+            def encode_queries(self, queries):
+                results = []
+                for emb in self._model.embed(list(queries)):
+                    indices = emb.indices.tolist()
+                    values = emb.values.tolist()
+                    results.append(dict(zip(indices, values)))
+                return results
+
+            def encode_documents(self, docs):
+                return self.encode_queries(docs)
+
         return MilvusVectorStore(
             uri=f"http://{settings.milvus_host}:{settings.milvus_port}",
-            collection_name=COLLECTION, dim=DIM, enable_sparse=False,
-            similarity_metric="COSINE", overwrite=False,
+            collection_name=COLLECTION, dim=DIM,
+            enable_sparse=True,
+            sparse_embedding_function=BM25SparseFunc(),
+            similarity_metric="COSINE",
+            hybrid_ranker="RRFRanker",
+            hybrid_ranker_params={"k": 60},
+            overwrite=False,
         )
 
     # ── Helpers ────────────────────────────────────────────
