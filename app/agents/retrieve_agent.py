@@ -67,8 +67,9 @@ class RetrieveAgent:
                 if nid not in seen:
                     seen.add(nid)
                     all_results.append(SearchResult(
-                        chunk_id=nid, doc_id=node.node.metadata.get("doc_id", ""),
-                        content=node.node.text or node.node.get_content(),
+                        chunk_id=nid if nid else node.node.metadata.get("chunk_id", nid),
+                        doc_id=node.node.metadata.get("doc_id", ""),
+                        content=node.node.get_content() or node.node.text,
                         doc_title=node.node.metadata.get("doc_title", ""),
                         score=node.score or 0.0,
                         metadata={"category": node.node.metadata.get("category", "")},
