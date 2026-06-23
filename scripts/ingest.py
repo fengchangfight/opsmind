@@ -1,8 +1,11 @@
-﻿"""Quick hybrid ingest: sparse + dense embeddings into Milvus."""
+﻿"""Hybrid ingest: fast filtered loading + SentenceSplitter (LlamaIndex) + dual embedding (dense + BM25 sparse)."""
 import asyncio
+import os
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 from app.config import settings
 from app.connectors import TxtConnector
@@ -20,57 +23,55 @@ async def main():
     print(f"[Ingest] Dense: {settings.embedding_dense_model}, Sparse: {settings.embedding_sparse_model}")
 
     connector = TxtConnector()
-    chunker = SimpleChunker(chunk_size=512, chunk_overlap=64)
+    chunker = SimpleChunker(chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
     embedder = Embedder()
     vector_store = VectorStore()
-
     vector_store.clear()
-    print("[Ingest] Cleared collection")
+    print("[Ingest] Cleared Milvus collection")
 
-    total_docs = 0
+    cats_to_scan = set(settings.demo_categories) if settings.demo_categories else {"confluence", "github"}
     cat_counts: dict[str, int] = {}
     batch_size = 10
-    chunk_buffer: list[Chunk] = []
-    text_buffer: list[str] = []
+    chunk_buf: list[Chunk] = []
+    text_buf: list[str] = []
+    total_chunks = 0
 
-    async for doc in connector.extract(str(data_path)):
-        cat = doc.metadata.get("category", "unknown")
-        if settings.demo_categories and cat not in settings.demo_categories:
+    for cat_name in cats_to_scan:
+        cat_dir = data_path / cat_name
+        if not cat_dir.exists():
             continue
-        if cat_counts.get(cat, 0) >= settings.demo_max_docs_per_category:
-            continue
-        cat_counts[cat] = cat_counts.get(cat, 0) + 1
-        total_docs += 1
+        async for doc in connector.extract(str(cat_dir)):
+            if cat_counts.get(cat_name, 0) >= settings.demo_max_docs_per_category:
+                break
+            cat_counts[cat_name] = cat_counts.get(cat_name, 0) + 1
 
-        chunks = chunker.chunk(doc)
-        chunk_buffer.extend(chunks)
-        text_buffer.extend([f"{doc.title}\n{c.content}" for c in chunks])
+            for c in chunker.chunk(doc):
+                chunk_buf.append(c)
+                text_buf.append(f"{doc.title}\n{c.content}")
 
-        if len(text_buffer) >= batch_size:
-            # Generate both embeddings
-            dense_embs = await embedder.embed(text_buffer)
-            sparse_embs = await embedder.embed_sparse(text_buffer)
-            for c, d, s in zip(chunk_buffer, dense_embs, sparse_embs):
-                c.embedding = d
-                c.sparse_embedding = s
-            vector_store.add_chunks(chunk_buffer)
-            chunk_buffer.clear()
-            text_buffer.clear()
+                if len(text_buf) >= batch_size:
+                    await _embed_batch(text_buf, chunk_buf, embedder, vector_store)
+                    total_chunks += len(chunk_buf)
+                    chunk_buf.clear()
+                    text_buf.clear()
 
-        if total_docs % 10 == 0:
-            print(f"[Ingest] {total_docs} docs, {sum(cat_counts.values())} chunks, cats: {dict(cat_counts)}")
+            if sum(cat_counts.values()) % 10 == 0:
+                print(f"[Ingest] {sum(cat_counts.values())} docs, ~{total_chunks} chunks, cats: {dict(cat_counts)}")
 
-    # Final batch
-    if chunk_buffer:
-        dense_embs = await embedder.embed(text_buffer)
-        sparse_embs = await embedder.embed_sparse(text_buffer)
-        for c, d, s in zip(chunk_buffer, dense_embs, sparse_embs):
-            c.embedding = d
-            c.sparse_embedding = s
-        vector_store.add_chunks(chunk_buffer)
+    if chunk_buf:
+        await _embed_batch(text_buf, chunk_buf, embedder, vector_store)
+        total_chunks += len(chunk_buf)
 
-    print(f"\n[Ingest] Done! {total_docs} docs, {vector_store.count()} chunks in Milvus")
-    print(f"[Ingest] Categories: {dict(cat_counts)}")
+    print(f"\n[Ingest] Done! {sum(cat_counts.values())} docs → {total_chunks} chunks, Milvus: {vector_store.count()}")
+
+
+async def _embed_batch(texts: list[str], chunks: list[Chunk], embedder: Embedder, vector_store: VectorStore):
+    dense = await embedder.embed(texts)
+    sparse = await embedder.embed_sparse(texts)
+    for c, d, s in zip(chunks, dense, sparse):
+        c.embedding = d
+        c.sparse_embedding = s
+    vector_store.add_chunks(chunks)
 
 
 if __name__ == "__main__":
