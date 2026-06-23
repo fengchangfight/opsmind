@@ -66,12 +66,17 @@ async def query(
             yield f"event: agent_start\ndata: {json.dumps({'agent_id': 'reason'})}\n\n"
 
             full_answer = ""
+            heartbeat_count = 0
             while True:
                 try:
-                    event_type, data = await asyncio.wait_for(tool_event_queue.get(), timeout=120)
+                    event_type, data = await asyncio.wait_for(tool_event_queue.get(), timeout=3)
                 except asyncio.TimeoutError:
-                    yield f"event: error\ndata: {json.dumps({'code': 'TIMEOUT', 'message': '请求超时'})}\n\n"
-                    break
+                    heartbeat_count += 1
+                    if heartbeat_count > 40:  # ~120s total
+                        yield f"event: error\ndata: {json.dumps({'code': 'TIMEOUT', 'message': '请求超时'})}\n\n"
+                        break
+                    yield ": heartbeat\n\n"
+                    continue
 
                 if event_type == "tool_call_start":
                     yield f"event: tool_call\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
