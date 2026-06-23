@@ -4,9 +4,9 @@ Uses pymilvus directly for collection management; LlamaIndex MilvusVectorStore
 available via _get_li_store() for advanced retriever/query engine use.
 """
 from typing import Optional
-from pymilvus import MilvusClient, DataType, AnnSearchRequest, RRFRanker
+from pymilvus import MilvusClient, DataType
 from app.config import settings
-from app.models import Chunk, SearchResult
+from app.models import Chunk
 
 
 COLLECTION = settings.milvus_collection_name
@@ -68,28 +68,6 @@ class VectorStore:
         self._ensure_collection()
         self._client.delete(COLLECTION, f'doc_id == "{doc_id}"')
 
-    def search(self, query_embedding: list[float], top_k: int = 5, filters: dict | None = None) -> list[SearchResult]:
-        self._ensure_collection()
-        expr = self._expr(filters)
-        results = self._client.search(
-            COLLECTION, [query_embedding], anns_field=DENSE_FIELD,
-            search_params={"metric_type": "COSINE", "params": {"ef": 64}},
-            limit=top_k, filter=expr,
-            output_fields=["chunk_id", "doc_id", "content", "doc_title", "category"],
-        )
-        return self._parse(results)
-
-    def hybrid_search(self, dense: list[float], sparse: dict[int, float], top_k: int = 5, filters: dict | None = None) -> list[SearchResult]:
-        self._ensure_collection()
-        expr = self._expr(filters)
-        dense_req = AnnSearchRequest([dense], DENSE_FIELD, {"metric_type": "COSINE", "params": {"ef": 64}}, top_k * 3, expr)
-        sparse_req = AnnSearchRequest([sparse], SPARSE_FIELD, {"metric_type": "IP"}, top_k * 3, expr)
-        results = self._client.hybrid_search(
-            COLLECTION, [dense_req, sparse_req], RRFRanker(k=60), top_k,
-            output_fields=["chunk_id", "doc_id", "content", "doc_title", "category"],
-        )
-        return self._parse(results)
-
     # ── LlamaIndex integration point ───────────────────────
     def get_li_store(self):
         """Return a LlamaIndex MilvusVectorStore with native sparse support (no FlagEmbedding)."""
@@ -123,22 +101,3 @@ class VectorStore:
             hybrid_ranker_params={"k": 60},
             overwrite=False,
         )
-
-    # ── Helpers ────────────────────────────────────────────
-    @staticmethod
-    def _expr(filters: dict | None) -> str | None:
-        return " && ".join(f'{k} == "{v}"' for k, v in filters.items()) if filters else None
-
-    @staticmethod
-    def _parse(results) -> list[SearchResult]:
-        parsed = []
-        for batch in results:
-            for hit in batch:
-                e = hit.get("entity", hit)
-                parsed.append(SearchResult(
-                    chunk_id=str(e.get("chunk_id", "")), doc_id=str(e.get("doc_id", "")),
-                    content=str(e.get("content", "")), doc_title=str(e.get("doc_title", "")),
-                    score=float(hit.get("distance", hit.get("score", 0))),
-                    metadata={"category": str(e.get("category", ""))},
-                ))
-        return parsed
