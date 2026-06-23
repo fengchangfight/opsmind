@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # Data
     sample_data_dir: str = "./sampledata/all_documents"
     chunk_size: int = 512
-    chunk_overlap: int = 64
+    chunk_overlap: int = 32
 
     # Database
     db_backend: str = "sqlite"       # "sqlite" or "postgres"
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     demo_categories_raw: str = "confluence,github"
 
     # Demo: max docs per category
-    demo_max_docs_per_category: int = 50
+    demo_max_docs_per_category: int = 5
 
     # Retrieval
     top_k: int = 5
