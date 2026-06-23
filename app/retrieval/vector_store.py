@@ -1,51 +1,71 @@
 ﻿"""
-Milvus vector store with hybrid search (dense + sparse).
-Uses MilvusClient API — dense HNSW index + sparse inverted index + RRFRanker fusion.
+Milvus vector store backed by LlamaIndex MilvusVectorStore.
+Supports dense + sparse hybrid search via RRFRanker.
 """
 from typing import Optional
-from pymilvus import (
-    MilvusClient, DataType, AnnSearchRequest, RRFRanker,
-)
+from pymilvus import MilvusClient, AnnSearchRequest, RRFRanker, DataType
+from llama_index.vector_stores.milvus import MilvusVectorStore
 from app.config import settings
 from app.models import Chunk, SearchResult
 
 
 COLLECTION = settings.milvus_collection_name
-DENSE_FIELD = "embedding_dense"
-SPARSE_FIELD = "embedding_sparse"
+DENSE_FIELD = "embedding"
+SPARSE_FIELD = "sparse_embedding"
 DIM = settings.milvus_dim
 
 
 class VectorStore:
+    """Vector store backed by LlamaIndex MilvusVectorStore for collection management,
+       with custom hybrid search for dense + sparse raw vector queries."""
+
     def __init__(self):
-        self._client = MilvusClient(uri=f"http://{settings.milvus_host}:{settings.milvus_port}")
+        self._store = self._build_store()
+        self._pymilvus = MilvusClient(uri=f"http://{settings.milvus_host}:{settings.milvus_port}")
+
+    def _build_store(self) -> MilvusVectorStore:
+        return MilvusVectorStore(
+            uri=f"http://{settings.milvus_host}:{settings.milvus_port}",
+            collection_name=COLLECTION,
+            dim=DIM,
+            embedding_field=DENSE_FIELD,
+            enable_sparse=True,
+            sparse_embedding_field=SPARSE_FIELD,
+            similarity_metric="COSINE",
+            hybrid_ranker="RRFRanker",
+            hybrid_ranker_params={"k": 60},
+            overwrite=False,
+            doc_id_field="doc_id",
+            text_key="chunk_id",
+            output_fields=["chunk_id", "doc_id", "content", "doc_title", "category"],
+        )
+
+    # ── Collection ──────────────────────────────────────────
 
     def _ensure_collection(self):
-        if self._client.has_collection(COLLECTION):
-            return
+        # LlamaIndex auto-creates on first access
+        pass
 
-        schema = self._client.create_schema(auto_id=True, enable_dynamic_field=False)
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="chunk_id", datatype=DataType.VARCHAR, max_length=256)
-        schema.add_field(field_name="doc_id", datatype=DataType.VARCHAR, max_length=256)
-        schema.add_field(field_name="content", datatype=DataType.VARCHAR, max_length=8192)
-        schema.add_field(field_name=DENSE_FIELD, datatype=DataType.FLOAT_VECTOR, dim=DIM)
-        schema.add_field(field_name=SPARSE_FIELD, datatype=DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_field(field_name="doc_title", datatype=DataType.VARCHAR, max_length=512)
-        schema.add_field(field_name="category", datatype=DataType.VARCHAR, max_length=64)
+    def count(self) -> int:
+        try:
+            stats = self._pymilvus.get_collection_stats(COLLECTION)
+            return stats.get("row_count", 0)
+        except Exception:
+            return 0
 
-        idx = self._client.prepare_index_params()
-        idx.add_index(field_name=DENSE_FIELD, metric_type="COSINE", index_type="HNSW",
-                      params={"M": 16, "efConstruction": 200})
-        idx.add_index(field_name=SPARSE_FIELD, metric_type="IP", index_type="SPARSE_INVERTED_INDEX")
+    def clear(self):
+        try:
+            if self._pymilvus.has_collection(COLLECTION):
+                self._pymilvus.drop_collection(COLLECTION)
+        except Exception:
+            pass
 
-        self._client.create_collection(COLLECTION, schema=schema, index_params=idx)
-        self._client.load_collection(COLLECTION)
+    # ── Write ───────────────────────────────────────────────
 
     def add_chunks(self, chunks: list[Chunk]):
+        """Insert chunks with dense + sparse embeddings."""
         if not chunks:
             return
-        self._ensure_collection()
         data = [
             {
                 "chunk_id": c.chunk_id,
@@ -58,90 +78,55 @@ class VectorStore:
             }
             for c in chunks
         ]
-        self._client.insert(COLLECTION, data)
-        self._client.flush(COLLECTION)
+        self._pymilvus.insert(COLLECTION, data)
+        self._pymilvus.flush(COLLECTION)
+
+    def delete_by_doc_id(self, doc_id: str):
+        self._pymilvus.delete(COLLECTION, f'doc_id == "{doc_id}"')
+
+    # ── Search ──────────────────────────────────────────────
 
     def search(
-        self,
-        query_embedding: list[float],
-        top_k: int = 5,
-        filters: dict | None = None,
+        self, query_embedding: list[float], top_k: int = 5, filters: dict | None = None,
     ) -> list[SearchResult]:
         """Dense-only vector search."""
-        self._ensure_collection()
         expr = self._build_expr(filters) if filters else None
-        results = self._client.search(
-            collection_name=COLLECTION,
-            data=[query_embedding],
+        results = self._pymilvus.search(
+            collection_name=COLLECTION, data=[query_embedding],
             anns_field=DENSE_FIELD,
             search_params={"metric_type": "COSINE", "params": {"ef": 64}},
-            limit=top_k,
-            filter=expr,
+            limit=top_k, filter=expr,
             output_fields=["chunk_id", "doc_id", "content", "doc_title", "category"],
         )
         return self._parse_results(results)
 
     def hybrid_search(
-        self,
-        dense_vector: list[float],
-        sparse_vector: dict[int, float],
-        top_k: int = 5,
-        filters: dict | None = None,
+        self, dense_vector: list[float], sparse_vector: dict[int, float],
+        top_k: int = 5, filters: dict | None = None,
     ) -> list[SearchResult]:
-        """
-        Hybrid search: dense + sparse with RRFRanker fusion.
-        Sends two AnnSearchRequests → Milvus RRFRanker(k=60) → merged Top-K.
-        """
-        self._ensure_collection()
+        """Dense + sparse hybrid search with RRFRanker."""
         expr = self._build_expr(filters) if filters else None
-
         dense_req = AnnSearchRequest(
-            data=[dense_vector],
-            anns_field=DENSE_FIELD,
+            data=[dense_vector], anns_field=DENSE_FIELD,
             param={"metric_type": "COSINE", "params": {"ef": 64}},
-            limit=top_k * 3,
-            expr=expr,
+            limit=top_k * 3, expr=expr,
         )
         sparse_req = AnnSearchRequest(
-            data=[sparse_vector],
-            anns_field=SPARSE_FIELD,
-            param={"metric_type": "IP"},
-            limit=top_k * 3,
-            expr=expr,
+            data=[sparse_vector], anns_field=SPARSE_FIELD,
+            param={"metric_type": "IP"}, limit=top_k * 3, expr=expr,
         )
-
-        results = self._client.hybrid_search(
-            collection_name=COLLECTION,
-            reqs=[dense_req, sparse_req],
-            ranker=RRFRanker(k=60),
-            limit=top_k,
+        results = self._pymilvus.hybrid_search(
+            collection_name=COLLECTION, reqs=[dense_req, sparse_req],
+            ranker=RRFRanker(k=60), limit=top_k,
             output_fields=["chunk_id", "doc_id", "content", "doc_title", "category"],
         )
         return self._parse_results(results)
 
-    def count(self) -> int:
-        try:
-            stats = self._client.get_collection_stats(COLLECTION)
-            return stats.get("row_count", 0)
-        except Exception:
-            return 0
-
-    def clear(self):
-        try:
-            if self._client.has_collection(COLLECTION):
-                self._client.drop_collection(COLLECTION)
-        except Exception:
-            pass
-
-    def delete_by_doc_id(self, doc_id: str):
-        """Delete all chunks belonging to a document."""
-        self._ensure_collection()
-        self._client.delete(COLLECTION, f'doc_id == "{doc_id}"')
+    # ── Helpers ─────────────────────────────────────────────
 
     @staticmethod
     def _build_expr(filters: dict) -> str:
-        conds = [f'{k} == "{v}"' for k, v in filters.items()]
-        return " && ".join(conds)
+        return " && ".join(f'{k} == "{v}"' for k, v in filters.items())
 
     @staticmethod
     def _parse_results(results) -> list[SearchResult]:

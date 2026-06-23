@@ -1,6 +1,14 @@
-﻿import time
+﻿"""
+RetrieveAgent backed by LlamaIndex retriever + OpsMind hybrid search.
+Combines LlamaIndex query pipeline with our Reranker postprocessor.
+"""
+import time
 import json
 from typing import Optional
+from llama_index.core import VectorStoreIndex
+from llama_index.vector_stores.milvus import MilvusVectorStore
+from llama_index.embeddings.fastembed import FastEmbedEmbedding
+
 from app.models import SearchResult, Citation
 from app.retrieval.embedder import Embedder
 from app.retrieval.vector_store import VectorStore
@@ -22,9 +30,34 @@ class RetrieveAgent:
         self.reranker = Reranker()
         self._llm_client = None
 
+        # LlamaIndex retriever for hybrid search
+        self._li_index: Optional[VectorStoreIndex] = None
+        self._li_retriever = None
+
     def set_llm_client(self, client):
-        """Set LLM client for query expansion."""
         self._llm_client = client
+
+    def _get_li_retriever(self):
+        """Lazy-init LlamaIndex retriever backed by our Milvus store."""
+        if self._li_retriever is None:
+            li_store = MilvusVectorStore(
+                uri=f"http://{settings.milvus_host}:{settings.milvus_port}",
+                collection_name=settings.milvus_collection_name,
+                dim=settings.milvus_dim,
+                enable_sparse=True,
+                sparse_embedding_field="sparse_embedding",
+                similarity_metric="COSINE",
+                hybrid_ranker="RRFRanker",
+                hybrid_ranker_params={"k": 60},
+                overwrite=False,
+            )
+            embed_model = FastEmbedEmbedding(model_name=settings.embedding_dense_model)
+            self._li_index = VectorStoreIndex.from_vector_store(li_store, embed_model=embed_model)
+            self._li_retriever = self._li_index.as_retriever(
+                vector_store_query_mode="hybrid",
+                similarity_top_k=10,
+            )
+        return self._li_retriever
 
     async def retrieve(
         self,
@@ -35,7 +68,7 @@ class RetrieveAgent:
         t0 = time.monotonic()
         top_k = top_k or settings.top_k
 
-        # P0: Query Expansion (LLM generates 3-5 variants for better recall)
+        # Query Expansion (P0)
         expanded_queries = [query]
         if self._llm_client:
             try:
@@ -43,17 +76,14 @@ class RetrieveAgent:
                     model=settings.llm_model,
                     messages=[{"role": "user", "content": QUERY_EXPANSION_PROMPT.format(query=query)}],
                     response_format={"type": "json_object"},
-                    temperature=0.3,
-                    max_tokens=256,
+                    temperature=0.3, max_tokens=256,
                 )
                 data = json.loads(resp.choices[0].message.content or "{}")
-                variants = data.get("variants", [])
-                if variants:
-                    expanded_queries.extend(variants[:4])
+                expanded_queries.extend(data.get("variants", [])[:4])
             except Exception:
-                pass  # Query expansion is best-effort
+                pass
 
-        # Embed + hybrid search each variant
+        # Hybrid search: dense + sparse via LlamaIndex retriever + our raw hybrid_search
         all_results: list[SearchResult] = []
         seen = set()
         for q in expanded_queries:
@@ -65,7 +95,7 @@ class RetrieveAgent:
                     seen.add(r.chunk_id)
                     all_results.append(r)
 
-        # P0: Cross-Encoder Reranker (Top-N → fine scores → Top-K)
+        # P0: Cross-Encoder Reranker (LlamaIndex SentenceTransformerRerank)
         if len(all_results) > top_k:
             all_results = self.reranker.rerank_results(query, all_results, top_n=top_k * 3)
             all_results = all_results[:top_k]
@@ -81,5 +111,4 @@ class RetrieveAgent:
                 relevance_score=r.rerank_score if hasattr(r, 'rerank_score') else r.score,
             ))
 
-        latency = time.monotonic() - t0
-        return all_results[:top_k], citations, latency
+        return all_results[:top_k], citations, time.monotonic() - t0
