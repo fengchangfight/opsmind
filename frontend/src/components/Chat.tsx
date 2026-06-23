@@ -190,6 +190,12 @@ export default function Chat({ onLogout }: Props) {
           break;
 
         case 'error':
+          if (data.code === 'UNAUTHORIZED' || data.message?.includes('unauthorized')) {
+            localStorage.removeItem('opsmind_token');
+            localStorage.removeItem('opsmind_user');
+            window.location.reload();
+            break;
+          }
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiMsg.id

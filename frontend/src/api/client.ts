@@ -8,8 +8,21 @@ function getToken(): string | null {
   return localStorage.getItem('opsmind_token');
 }
 
+function handleAuthError(res: Response) {
+  if (res.status === 401) {
+    localStorage.removeItem('opsmind_token');
+    localStorage.removeItem('opsmind_user');
+    localStorage.removeItem('opsmind_session_id');
+    window.location.reload();
+  }
+}
+
+function authHeaders(): HeadersInit {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export function connectSSE(url: string, handler: EventHandler): void {
-  // SSE via EventSource doesn't support custom headers. Workaround: pass token as query param.
   const token = getToken();
   const sep = url.includes('?') ? '&' : '?';
   eventSource = new EventSource(token ? `${url}${sep}_token=${encodeURIComponent(token)}` : url);
@@ -27,7 +40,18 @@ export function connectSSE(url: string, handler: EventHandler): void {
     });
   });
 
-  eventSource.onerror = () => {
+  eventSource.onerror = async () => {
+    // Check if it's an auth failure by trying a quick API call
+    try {
+      const res = await fetch('/api/sessions', { headers: authHeaders() });
+      if (res.status === 401) {
+        localStorage.removeItem('opsmind_token');
+        localStorage.removeItem('opsmind_user');
+        localStorage.removeItem('opsmind_session_id');
+        window.location.reload();
+        return;
+      }
+    } catch {}
     handler('error', { code: 'SSE_FAILED', message: '连接中断' });
   };
 }
@@ -38,30 +62,25 @@ export function disconnectSSE(): void {
 }
 
 export async function fetchSessions(): Promise<any[]> {
-  const res = await fetch('/api/sessions', {
-    headers: { Authorization: `Bearer ${getToken()}` },
-  });
+  const res = await fetch('/api/sessions', { headers: authHeaders() });
+  handleAuthError(res);
   const data = await res.json();
   return data.sessions || [];
 }
 
 export async function fetchSession(sessionId: string): Promise<any> {
-  const res = await fetch(`/api/sessions/${sessionId}`, {
-    headers: { Authorization: `Bearer ${getToken()}` },
-  });
+  const res = await fetch(`/api/sessions/${sessionId}`, { headers: authHeaders() });
+  handleAuthError(res);
   return res.json();
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`/api/sessions/${sessionId}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${getToken()}` },
-  });
+  const res = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE', headers: authHeaders() });
+  handleAuthError(res);
 }
 
 export async function getMcpStatus(): Promise<any> {
-  const res = await fetch('/api/mcp/status', {
-    headers: { Authorization: `Bearer ${getToken()}` },
-  });
+  const res = await fetch('/api/mcp/status', { headers: authHeaders() });
+  handleAuthError(res);
   return res.json();
 }
