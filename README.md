@@ -125,13 +125,19 @@ event: final_answer      → {"answer": "...", "citations": [...]}
 
 ## 示例问题
 
-| 问题 | 检索目标 |
+基于当前 Default 摄入 (5 docs/类) 的精确匹配：
+
+| 问题 | 命中文档 |
 |------|---------|
-| How to ensure deterministic evaluation results in CI? | CI Eval Determinism and Flake Mitigation |
-| What is the retention policy evaluation process? | ADR-017: Retention Policy |
-| How does the evaluator backpressure system work? | Evaluator Backpressure Playbook |
-| What's the current time? (trigger native tool) | get_current_time tool |
-| Use the echo tool to say hello (trigger MCP tool) | mcp_demo_echo tool |
+| `How does the retention policy evaluation work in the control plane?` | ADR-017: Retention Policy |
+| `How to validate a new model version with shadow deployment?` | Cohort-driven Shadow Validation |
+| `What is the probe pruning strategy for cost-efficient evals?` | Probe Pruning and Adaptive Sampling |
+| `How does evaluator backpressure and priority fairness work?` | Evaluator Backpressure Playbook |
+| `How are operational eval sweeps prioritized?` | Eval Sweep and Prioritization Framework |
+| `How does runtime-driven batching and quantization work?` | cost-pilot: batching + quantization |
+| `How does eager QK fusion improve inference speed?` | Eager-QK fuse + rotary normalization |
+
+**触发工具**: `What is the current time?` (native) · `Calculate 15 * 23 + 7` (native) · `Use the echo tool to say hello` (MCP)
 
 ---
 
