@@ -1,5 +1,7 @@
-﻿"""Hybrid ingest: fast filtered loading + SentenceSplitter (LlamaIndex) + dual embedding (dense + BM25 sparse)."""
+﻿"""Hybrid ingest with incremental indexing — skips unchanged docs, deletes removed docs, caches via content hash."""
 import asyncio
+import json
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -11,6 +13,23 @@ from app.config import settings
 from app.connectors import TxtConnector
 from app.retrieval import SimpleChunker, Embedder, VectorStore
 from app.models import Chunk
+
+CACHE_FILE = Path("data/ingest_cache.json")
+
+
+def _load_cache() -> dict[str, str]:
+    if CACHE_FILE.exists():
+        return json.loads(CACHE_FILE.read_text())
+    return {}
+
+
+def _save_cache(cache: dict[str, str]):
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(json.dumps(cache))
+
+
+def _hash_content(text: str) -> str:
+    return hashlib.md5(text.encode()).hexdigest()
 
 
 async def main():
@@ -26,15 +45,17 @@ async def main():
     chunker = SimpleChunker(chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
     embedder = Embedder()
     vector_store = VectorStore()
-    vector_store.clear()
-    print("[Ingest] Cleared Milvus collection")
+
+    cache = _load_cache()
+    print(f"[Ingest] Cache: {len(cache)} previously indexed docs")
 
     cats_to_scan = set(settings.demo_categories) if settings.demo_categories else {"confluence", "github"}
     cat_counts: dict[str, int] = {}
     batch_size = 10
     chunk_buf: list[Chunk] = []
     text_buf: list[str] = []
-    total_chunks = 0
+    total_new, total_skip, total_delete = 0, 0, 0
+    new_cache: dict[str, str] = {}
 
     for cat_name in cats_to_scan:
         cat_dir = data_path / cat_name
@@ -45,24 +66,40 @@ async def main():
                 break
             cat_counts[cat_name] = cat_counts.get(cat_name, 0) + 1
 
+            # Q2: dedup — skip if content unchanged
+            doc_hash = _hash_content(doc.content)
+            new_cache[doc.doc_id] = doc_hash
+            if cache.get(doc.doc_id) == doc_hash:
+                total_skip += 1
+                continue
+
+            total_new += 1
             for c in chunker.chunk(doc):
                 chunk_buf.append(c)
                 text_buf.append(f"{doc.title}\n{c.content}")
-
                 if len(text_buf) >= batch_size:
                     await _embed_batch(text_buf, chunk_buf, embedder, vector_store)
-                    total_chunks += len(chunk_buf)
                     chunk_buf.clear()
                     text_buf.clear()
 
-            if sum(cat_counts.values()) % 10 == 0:
-                print(f"[Ingest] {sum(cat_counts.values())} docs, ~{total_chunks} chunks, cats: {dict(cat_counts)}")
+            if (total_new + total_skip) % 10 == 0:
+                print(f"[Ingest] {total_new} new, {total_skip} skipped, cats: {dict(cat_counts)}")
 
+    # Q1: delete chunks for docs no longer in source
+    removed_ids = set(cache.keys()) - set(new_cache.keys())
+    for doc_id in removed_ids:
+        vector_store.delete_by_doc_id(doc_id)
+        total_delete += 1
+    if total_delete:
+        print(f"[Ingest] Removed {total_delete} stale documents")
+
+    # Final batch
     if chunk_buf:
         await _embed_batch(text_buf, chunk_buf, embedder, vector_store)
-        total_chunks += len(chunk_buf)
 
-    print(f"\n[Ingest] Done! {sum(cat_counts.values())} docs → {total_chunks} chunks, Milvus: {vector_store.count()}")
+    _save_cache(new_cache)
+
+    print(f"\n[Ingest] Done! {total_new} new, {total_skip} skipped, {total_delete} deleted, Milvus: {vector_store.count()}")
 
 
 async def _embed_batch(texts: list[str], chunks: list[Chunk], embedder: Embedder, vector_store: VectorStore):

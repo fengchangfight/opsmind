@@ -133,6 +133,11 @@ class VectorStore:
         except Exception:
             pass
 
+    def delete_by_doc_id(self, doc_id: str):
+        """Delete all chunks belonging to a document."""
+        self._ensure_collection()
+        self._client.delete(COLLECTION, f'doc_id == "{doc_id}"')
+
     @staticmethod
     def _build_expr(filters: dict) -> str:
         conds = [f'{k} == "{v}"' for k, v in filters.items()]
