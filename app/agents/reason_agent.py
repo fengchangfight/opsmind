@@ -127,10 +127,6 @@ class ReasonAgent:
 
         if event_queue:
             event_queue.put_nowait(("agent_start", {"agent_id": "reason_graph"}))
-            event_queue.put_nowait(("reasoning_step", {
-                "step": 0, "confidence": 0.0, "iteration": 0, "max_iterations": 3,
-                "message": "开始迭代推理...",
-            }))
 
         try:
             final_state = await self._reason_graph.ainvoke(initial_state, config)

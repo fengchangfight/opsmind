@@ -52,10 +52,10 @@ async def build_reason_graph(
     # ── Node: evaluate (normal LLM, tools allowed) ──────────────
     async def evaluate_node(state: ReasonState) -> dict:
         it = state.get("iteration", 0)
-        mx = state.get("max_iterations", 3)
+        mx = state.get("max_iterations", 1)
         if event_queue:
             event_queue.put_nowait(("reasoning_step", {
-                "step": it, "iteration": it + 1, "max_iterations": mx,
+                "step": it, "iteration": it, "max_iterations": mx,
                 "message": f"迭代 {it + 1}/{mx} — 分析中...",
             }))
         messages = [
