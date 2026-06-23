@@ -27,7 +27,7 @@ async def resume(req: ResumeRequest, http_request: Request):
         try:
             yield f"event: agent_start\ndata: {json.dumps({'agent_id': 'reason', 'status': 'resumed'})}\n\n"
             full_answer = ""
-            async for token in reason_agent.reason_stream(modified_query, results, citations):
+            async for token in reason_agent.reason_graph_stream(modified_query, results, citations):
                 full_answer += token
                 yield f"event: chunk\ndata: {json.dumps({'content': token})}\n\n"
                 await asyncio.sleep(0)
