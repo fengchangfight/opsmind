@@ -31,15 +31,20 @@ class VectorStore:
         self._client.create_collection(COLLECTION, schema=schema, index_params=idx)
         self._client.load_collection(COLLECTION)
 
+    @property
+    def count(self) -> int:
+        try:
+            self._client.load_collection(COLLECTION)
+            stats = self._client.get_collection_stats(COLLECTION)
+            return stats.get("row_count", 0)
+        except Exception:
+            return 0
+
     def clear(self):
         self._ensure_collection()  # triggers the check, won't recreate if exists
         if self._client.has_collection(COLLECTION):
             self._client.drop_collection(COLLECTION)
         self._li = None  # invalidate LlamaIndex store
-
-    def delete_by_doc_id(self, doc_id: str):
-        self._ensure_collection()
-        self._client.delete(COLLECTION, f'doc_id == "{doc_id}"')
 
     # ── LlamaIndex MilvusVectorStore (read + write via IngestionPipeline) ──
 
