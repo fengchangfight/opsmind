@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
     # Store for cleanup
     app.state._mcp_startup = mcp_startup_task
 
-    doc_count = vector_store.count()
+    doc_count = vector_store.count
     print(f"[OpsMind] Vector store contains {doc_count} chunks")
     print(f"[OpsMind] Ready on http://{settings.api_host}:{settings.api_port}")
 
@@ -115,4 +115,4 @@ app.include_router(auth.router, prefix="/api")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "docs_indexed": app.state.runtime["vector_store"].count()}
+    return {"status": "ok", "docs_indexed": app.state.runtime["vector_store"].count}

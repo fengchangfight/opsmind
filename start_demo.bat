@@ -8,7 +8,7 @@ echo === OpsMind RAG Demo ===
 echo.
 
 REM Check if data exists
-python -c "from app.retrieval.vector_store import VectorStore; c = VectorStore().count(); exit(0 if c > 0 else 1)" 2>nul
+python -c "from app.retrieval.vector_store import VectorStore; c = VectorStore().count; exit(0 if c > 0 else 1)" 2>nul
 if %errorlevel% neq 0 (
     echo [INFO] No indexed data found. Running ingestion...
     echo [INFO] This may take 2-3 minutes on first run
