@@ -29,14 +29,9 @@ class VectorStore:
             collection_name=COLLECTION,
             dim=DIM,
             embedding_field=DENSE_FIELD,
-            enable_sparse=True,
-            sparse_embedding_field=SPARSE_FIELD,
+            enable_sparse=False,  # Sparse handled separately via our Embedder
             similarity_metric="COSINE",
-            hybrid_ranker="RRFRanker",
-            hybrid_ranker_params={"k": 60},
             overwrite=False,
-            doc_id_field="doc_id",
-            text_key="chunk_id",
             output_fields=["chunk_id", "doc_id", "content", "doc_title", "category"],
         )
 
