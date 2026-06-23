@@ -48,7 +48,8 @@ async def main():
     embedder = Embedder()
     vector_store = VectorStore()
     vector_store.clear()
-    vector_store._ensure_collection()
+    vector_store._ensure_li_store()  # LlamaIndex creates schema
+    print("[Ingest] Collection ready")
 
     cache = _load_cache()
 
@@ -95,7 +96,7 @@ async def main():
     if removed: print(f"[Ingest] Removed {len(removed)} stale docs")
 
     _save_cache(new_cache)
-    print(f"[Ingest] Done! {len(li_docs)} new, {skipped} skipped, Milvus: {vector_store.count()}")
+    print(f"[Ingest] Done! {len(li_docs)} new, {skipped} skipped, Milvus: {vector_store.count}")
 
 
 if __name__ == "__main__":

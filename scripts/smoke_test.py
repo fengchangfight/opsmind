@@ -22,7 +22,7 @@ async def main():
 
     # 2. Vector Store
     vs = VectorStore()
-    count = vs.count()
+    count = vs.count
     print(f"\n2. Vector Store: {count} chunks indexed")
     if count == 0:
         print("   WARNING: No data. Run 'python scripts/ingest.py' first.")

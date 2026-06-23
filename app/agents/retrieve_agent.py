@@ -68,11 +68,11 @@ class RetrieveAgent:
                     seen.add(nid)
                     all_results.append(SearchResult(
                         chunk_id=nid, doc_id=node.node.metadata.get("doc_id", ""),
-                        content=node.node.text, doc_title=node.node.metadata.get("doc_title", ""),
+                        content=node.node.text or node.node.get_content(),
+                        doc_title=node.node.metadata.get("doc_title", ""),
                         score=node.score or 0.0,
                         metadata={"category": node.node.metadata.get("category", "")},
                     ))
-
         # Cross-Encoder Reranker
         if len(all_results) > top_k:
             all_results = self.reranker.rerank_results(query, all_results, top_n=top_k * 3)
