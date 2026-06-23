@@ -21,15 +21,13 @@ class VectorStore:
     def _ensure_collection(self):
         if self._client.has_collection(COLLECTION):
             return
-        schema = self._client.create_schema(auto_id=True, enable_dynamic_field=True)
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("chunk_id", DataType.VARCHAR, max_length=256)
+        schema = self._client.create_schema(auto_id=False, enable_dynamic_field=True)
+        schema.add_field("id", DataType.VARCHAR, max_length=256, is_primary=True)
         schema.add_field("doc_id", DataType.VARCHAR, max_length=256)
-        schema.add_field("content", DataType.VARCHAR, max_length=8192)
+        schema.add_field("text", DataType.VARCHAR, max_length=8192)
         schema.add_field(DENSE_FIELD, DataType.FLOAT_VECTOR, dim=DIM)
         schema.add_field(SPARSE_FIELD, DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_field("doc_title", DataType.VARCHAR, max_length=512)
-        schema.add_field("category", DataType.VARCHAR, max_length=64)
+        # doc_title, category stored as dynamic fields
         idx = self._client.prepare_index_params()
         idx.add_index(DENSE_FIELD, metric_type="COSINE", index_type="HNSW", params={"M": 16, "efConstruction": 200})
         idx.add_index(SPARSE_FIELD, metric_type="IP", index_type="SPARSE_INVERTED_INDEX")
@@ -55,7 +53,7 @@ class VectorStore:
             return
         self._ensure_collection()
         data = [{
-            "chunk_id": c.chunk_id, "doc_id": c.doc_id, "content": c.content[:8192],
+            "id": c.chunk_id, "doc_id": c.doc_id, "text": c.content[:8192],
             DENSE_FIELD: c.embedding or [0.0] * DIM,
             SPARSE_FIELD: c.sparse_embedding or {},
             "doc_title": c.metadata.get("doc_title", ""),
@@ -70,13 +68,12 @@ class VectorStore:
 
     # ── LlamaIndex integration (retrieval only) ─────────────
     def get_li_store(self):
-        """LlamaIndex MilvusVectorStore pointing at our collection (read-only for retrieval)."""
+        """LlamaIndex MilvusVectorStore for retrieval only (dense, no sparse — our collection has the data)."""
         from llama_index.vector_stores.milvus import MilvusVectorStore
         return MilvusVectorStore(
             uri=f"http://{settings.milvus_host}:{settings.milvus_port}",
             collection_name=COLLECTION, dim=DIM,
             similarity_metric="COSINE", overwrite=False,
-            text_key="content",
-            embedding_field=DENSE_FIELD,
-            output_fields=["chunk_id", "doc_id", "content", "doc_title", "category"],
+            text_key="text",
+            output_fields=["id", "doc_id", "text", "doc_title", "category"],
         )
