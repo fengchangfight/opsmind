@@ -75,6 +75,7 @@ class ReasonAgent:
                 checkpoint_path=f"./data/langgraph_{session_id or 'default'}.db",
                 tools=all_tools if all_tools else None,
                 tool_executor=tool_executor if all_tools else None,
+                event_queue=event_queue,
             )
 
         doc_texts = [

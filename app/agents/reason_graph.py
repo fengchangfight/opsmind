@@ -37,12 +37,11 @@ def _build_evaluate_prompt(state: ReasonState) -> str:
 
 
 async def build_reason_graph(
-    llm_client,
-    retriever,
-    model: str = "gpt-4o",
+    llm_client, retriever, model: str = "gpt-4o",
     checkpoint_path: str = "./data/langgraph_checkpoint.db",
     tools: list[dict] | None = None,
     tool_executor=None,  # async fn(tool_name, args) -> str
+    event_queue=None,   # asyncio.Queue for SSE progress events
 ):
     try:
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -52,6 +51,13 @@ async def build_reason_graph(
 
     # ── Node: evaluate (normal LLM, tools allowed) ──────────────
     async def evaluate_node(state: ReasonState) -> dict:
+        it = state.get("iteration", 0)
+        if event_queue:
+            event_queue.put_nowait(("reasoning_step", {
+                "step": it, "confidence": 0.0,
+                "iteration": it, "max_iterations": state.get("max_iterations", 3),
+                "message": f"迭代 {it+1}/{state.get('max_iterations',3)} — 分析中...",
+            }))
         messages = [
             {"role": "system", "content": (
                 "You are an SRE assistant. Answer based on context. "
@@ -89,6 +95,12 @@ async def build_reason_graph(
         query = state.get("query", "")
         if not answer.strip():
             return {"confidence": 0.0, "gaps": [], "iteration": state.get("iteration", 0), "max_iterations": state.get("max_iterations", 3)}
+
+        if event_queue:
+            event_queue.put_nowait(("reasoning_step", {
+                "step": state.get("iteration", 0),
+                "message": "信心评估中...",
+            }))
 
         prompt = (
             f'Question: {query}\nAnswer: {answer[:2000]}\n\n'
