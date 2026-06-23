@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # Retrieval
     top_k: int = 5
-    max_iterations: int = 3
+    max_iterations: int = 1
 
     @property
     def demo_categories(self) -> list[str]:
