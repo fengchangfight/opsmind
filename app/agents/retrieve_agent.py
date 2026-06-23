@@ -35,8 +35,7 @@ class RetrieveAgent:
             similarity_top_k=settings.top_k * 3,
         )
         # Pre-warm reranker in background (non-blocking)
-        import threading
-        threading.Thread(target=self.reranker._load, daemon=True).start()
+        self.reranker.warm_up()
         return self
 
     async def retrieve(

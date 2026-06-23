@@ -1,5 +1,6 @@
-"""Cross-Encoder Reranker backed by LlamaIndex SentenceTransformerRerank postprocessor."""
+"""Cross-Encoder Reranker — background warming, non-blocking at query time."""
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -9,22 +10,29 @@ class Reranker:
         self.model_name = model_name
         self.top_n = top_n
         self._postprocessor = None
+        self._warming = False
 
-    def _load(self):
-        if self._postprocessor is not None:
+    def warm_up(self):
+        """Start background model loading. Non-blocking."""
+        if self._warming or self._postprocessor is not None:
             return
-        try:
-            from llama_index.core.postprocessor import SentenceTransformerRerank
-            self._postprocessor = SentenceTransformerRerank(model=self.model_name, top_n=self.top_n)
-            logger.info(f"[Reranker] Loaded {self.model_name} via LlamaIndex")
-        except Exception as e:
-            logger.warning(f"[Reranker] unavailable: {e}")
-            self._postprocessor = False
+        self._warming = True
+
+        def _load():
+            try:
+                from llama_index.core.postprocessor import SentenceTransformerRerank
+                self._postprocessor = SentenceTransformerRerank(model=self.model_name, top_n=self.top_n)
+                logger.info(f"[Reranker] Ready: {self.model_name}")
+            except Exception as e:
+                logger.warning(f"[Reranker] unavailable: {e}")
+                self._postprocessor = False
+
+        threading.Thread(target=_load, daemon=True).start()
 
     def rerank_results(self, query: str, results: list, top_n: int = 5) -> list:
-        if not results:
-            return results
-        self._load()
+        """Re-rank results. If model not ready, return top_n as-is (non-blocking)."""
+        if not results or self._postprocessor is None:
+            return results[:top_n]
         if self._postprocessor is False:
             return results[:top_n]
 
